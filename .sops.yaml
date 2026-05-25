@@ -1,0 +1,16 @@
+# sops config — controls which age public key encrypts which files
+# This file IS committed (contains only public key material)
+# Private key lives at ~/.config/sops/age/keys.txt (gitignored, never committed)
+
+creation_rules:
+  # Anything ending in .sops.yaml (community convention)
+  - path_regex: \.sops\.ya?ml$
+    age: age1m3fmwrw6cplwvtd8nc4wyfsu0a69rp6eckzzfh3x9keauvxh89wsc0s3lu
+
+  # Anything in a secrets/ directory at any depth
+  - path_regex: (^|/)secrets/.*\.(ya?ml|json|env)$
+    age: age1m3fmwrw6cplwvtd8nc4wyfsu0a69rp6eckzzfh3x9keauvxh89wsc0s3lu
+
+  # Backwards-compat with what was here
+  - path_regex: \.enc\.ya?ml$
+    age: age1m3fmwrw6cplwvtd8nc4wyfsu0a69rp6eckzzfh3x9keauvxh89wsc0s3lu
