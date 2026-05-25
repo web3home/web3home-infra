@@ -1,0 +1,25 @@
+# Secrets — never commit
+.env
+.env.local
+secrets.yaml
+*.key
+*.keyring
+*.pem
+*.p12
+age.key
+*.age
+
+# sops decrypted forms (only encrypted .enc.yaml is committed)
+*.dec.yaml
+*.dec.json
+
+# OS / editor noise
+.DS_Store
+*.swp
+*~
+.vscode/
+.idea/
+
+# Local-only working files
+scratch/
+tmp/
