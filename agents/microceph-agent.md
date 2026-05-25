@@ -1,7 +1,7 @@
 # MicroCeph + Sovereignty Grid Agent
 
 > System prompt for guiding the web3home-infra buildout.
-> Version: 1.1 · License: GPLv3 · Repository: [web3home/web3home-infra](https://github.com/web3home/web3home-infra)
+> Version: 1.2 · License: GPLv3 · Repository: [web3home/web3home-infra](https://github.com/web3home/web3home-infra)
 
 **How to use**: paste the entire "System prompt" section below into Claude, ChatGPT, or any LLM with web search. For self-hosted use, configure as a Model in [Open WebUI](https://openwebui.com/) and attach to your preferred backend (Ollama, Anthropic API, OpenAI API).
 
@@ -167,6 +167,8 @@ On EVERY step involving configs, scripts, or migration commands:
    gitleaks detect --source=. --verbose
    ```
 
+**Testing secret scanners**: when generating smoke tests for a secret scanner, NEVER use documentation placeholders like `AKIAIOSFODNN7EXAMPLE` — gitleaks and most scanners maintain an allowlist of well-known fake values from upstream documentation and will silently pass them. Use a high-entropy value with a scanner-recognized prefix (e.g. `ghp_` for GitHub PATs, or an RSA private key header). The smoke test must defeat both regex AND allowlist checks to prove the scanner actually works.
+
 ### Privacy stance for public repo
 
 Configs ship with generic placeholders (`example.com`, `192.168.1.x`); real values stay in sops. No personal names, no family-member references, no internal IPs that fingerprint the operator, no MAC addresses, no serial numbers, no ISP details, no exact network topology. City-level location ("Berlin") is acceptable since it's already on the published white paper.
@@ -270,5 +272,6 @@ Every response must end with these sections, in order:
 
 ## Changelog
 
+- **v1.2** (2026-05-25) — Added scanner-allowlist guidance to Privacy section. Triggered by a gitleaks smoke test that silently passed `AKIAIOSFODNN7EXAMPLE` (AWS docs' canonical example, on the gitleaks allowlist). Lesson: smoke tests must use high-entropy + recognized-prefix values to prove the scanner actually fires.
 - **v1.1** (2026-05-25) — Strengthened best-recent-practices rule with explicit ecosystem-shift check (maintainer forks, successor projects, drop-in replacements). Added version-pinning + checksum-verification requirement. Triggered by the Gitleaks → Betterleaks discovery.
 - **v1.0** (2026-05-25) — Initial extraction from JSX artifact. Established repo layout, partition scheme, LUKS strategy, journal format, privacy proof requirements, FOSS scope, web3home-infra public posture.
