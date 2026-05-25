@@ -4,6 +4,96 @@ Paste these into `JOURNAL.md` at the repo root (create the file if it doesn't ex
 
 ---
 
+## 2026-05-25 — Phase 0 complete: secrets toolchain operational
+
+**Type**: install · **Duration**: ~1.5 hr · **Outcome**: success
+
+**Why**: Phase 0 requires automated privacy enforcement before any sensitive configs land in the repo. Manual `git diff | grep` review is too easy to forget.
+
+**Source / pinned versions**:
+- age 1.1.1 — Ubuntu 24.04 apt
+- sops v3.13.1 — https://github.com/getsops/sops/releases/tag/v3.13.1
+- gitleaks v8.30.1 — https://github.com/gitleaks/gitleaks/releases/tag/v8.30.1
+- pre-commit 4.6.0 — via pipx
+- gitleaks-action @v2 — https://github.com/gitleaks/gitleaks-action
+- action-shellcheck @2.0.0 — https://github.com/ludeeus/action-shellcheck
+
+**Steps**:
+- Installed all four tools, verified versions
+- Generated age keypair at `~/.config/sops/age/keys.txt` (chmod 600, outside repo)
+- Created `.sops.yaml` with rules for `*.sops.yaml` and `secrets/**` paths
+- Created `.pre-commit-config.yaml` with gitleaks + standard hygiene hooks
+- Ran `pre-commit install`
+- Added `.github/workflows/gitleaks.yml` and `.github/workflows/shellcheck.yml`
+- Verified safety net: a fake high-entropy GitHub PAT was blocked by the local hook
+- Verified server backstop: both Actions workflows ran green on first push
+
+**Verified**:
+- `pre-commit run --all-files` passes
+- High-entropy test commit blocked locally
+- Both GitHub Actions workflows green on the Actions tab
+
+**Rollback**: `pre-commit uninstall` removes the local hook. The age private key is the only irreplaceable artifact — backed up to <FILL IN your method>.
+
+---
+
+## 2026-05-25 — Decision: chose Gitleaks v8.30.1 over Betterleaks
+
+**Type**: decision · **Duration**: 15 min · **Outcome**: decided
+
+**Why**: discovered during Phase 0 that Zach Rice (Gitleaks creator) launched Betterleaks in Feb 2026 with materially better recall (98.6% vs Gitleaks' 70.4% on CredData benchmark).
+
+**Decision**: Gitleaks v8.30.1 for Phase 0. Re-evaluate Betterleaks in ~6 months.
+
+**Rationale**:
+- Betterleaks is very new (~470 stars vs Gitleaks' 25k+) and pre-commit integration is still catching up
+- Betterleaks is positioned as a drop-in replacement, so migration cost when mature is low
+- For a homelab repo with sops + manual review upstream, Gitleaks' 70% recall as automated backstop is acceptable
+- Asymmetric risk: immature tooling can break the pipeline; mature tooling missing edge cases is mitigated by other layers
+
+**Sources**:
+- https://www.helpnetsecurity.com/2026/03/19/betterleaks-open-source-secrets-scanner/
+- https://github.com/getsops/sops/releases (sops v3.13.1)
+- https://github.com/gitleaks/gitleaks/releases (gitleaks v8.30.1)
+
+**Re-evaluation triggers**: Betterleaks >5k stars OR official pre-commit hook lands OR a real Gitleaks miss is found in this repo's history.
+
+---
+
+## 2026-05-25 — Incident: gitleaks smoke test passed a fake AWS key
+
+**Type**: incident · **Duration**: 20 min · **Outcome**: resolved
+
+**Why**: tested the pre-commit hook with `AKIAIOSFODNN7EXAMPLE` (AWS docs' canonical example). Gitleaks did not flag it; commit landed and was pushed to remote before the gap was noticed.
+
+**Root cause**: gitleaks maintains an allowlist of well-known documentation placeholders to suppress false positives. AKIAIOSFODNN7EXAMPLE is on it. The chosen test value tested only the regex, not the allowlist behavior.
+
+**Workaround**:
+- Reverted the bad commit with `git revert` (preserved history; no force-push)
+- Retested with a high-entropy GitHub PAT-shaped value (`ghp_...`) — hook fired correctly
+- Updated `agents/microceph-agent.md` to v1.2 with explicit guidance against documentation placeholders in smoke tests
+
+**Verified**: clean revert pushed; proper smoke test now blocks correctly; agent prompt encodes the lesson.
+
+**Rollback**: not needed.
+
+---
+
+## 2026-05-25 — Decision: age private key backup strategy
+
+**Type**: decision · **Duration**: 10 min · **Outcome**: decided
+
+**Why**: the age private key at `~/.config/sops/age/keys.txt` decrypts every secret in this repo. Loss = all secrets unreadable. Leak = full breach. Backup is mandatory before relying on sops.
+
+**Decision**: <FILL IN your chosen method — paper, Vaultwarden, USB stick, combination>
+
+**Rejected**: cloud storage (violates self-custody), single laptop copy (SPOF on disk failure).
+
+**Verification**: <describe how you confirmed the backup is recoverable — e.g. "decrypted a test sops file using only the restored backup">
+
+**Rollback if compromised**: generate new age keypair → re-encrypt all `*.sops.yaml` files with new public key → update `.sops.yaml` in repo → destroy old key material.
+
+
 ## 2026-05-25 — Adopted Markdown-only agent format (archived JSX artifact)
 
 **Type**: decision · **Duration**: 30 min · **Outcome**: success
