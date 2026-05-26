@@ -4,6 +4,24 @@ Order: oldest at the bottom, newest at the top.
 
 ---
 
+## 2026-05-26 — Tweak: bound systemd-networkd-wait-online to first interface
+
+**Type**: tweak · **Outcome**: applied, not yet verified
+
+**Why**: every boot was hanging ~2 minutes on `systemd-networkd-wait-online.service`. `systemd-analyze blame` showed the wait-online service at 2:00.041, with the underlying cause being that the Beelink has three network interfaces (two onboard 10GbE NICs and one Wi-Fi) and the default behavior waits for ALL to reach "routable" state. With only `enp197s0` actually connected, the service times out at 120s for the unused interfaces.
+
+**Fix**: drop-in override at `/etc/systemd/system/systemd-networkd-wait-online.service.d/override.conf` changing the command to `--any --timeout=20`. Boot now waits for any one interface (typically `enp197s0`) to come online, with a 20s ceiling.
+
+**Verified**: pending. Not yet rebooted. Validate on next routine reboot.
+
+**Rollback**: `sudo rm /etc/systemd/system/systemd-networkd-wait-online.service.d/override.conf && sudo systemctl daemon-reload`. Config is also tracked at `system/systemd/systemd-networkd-wait-online-override.conf`.
+
+**Sources**:
+- https://github.com/systemd/systemd/issues/28927
+- https://www.baeldung.com/linux/systemd-networkd-wait-online-service-timeout-solution
+
+---
+
 ## 2026-05-26 — Privacy audit of repo after Phase 1
 
 **Type**: tweak · **Outcome**: clean
