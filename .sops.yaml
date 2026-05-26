@@ -5,12 +5,18 @@
 creation_rules:
   # Anything ending in .sops.yaml (community convention)
   - path_regex: \.sops\.ya?ml$
-    age: age1m3fmwrw6cplwvtd8nc4wyfsu0a69rp6eckzzfh3x9keauvxh89wsc0s3lu
+    age: >-
+      age1m3fmwrw6cplwvtd8nc4wyfsu0a69rp6eckzzfh3x9keauvxh89wsc0s3lu,
+      age1nxsmvzypx40wqexkt0mcsjdzvkafj29vu954p7u3nerlsya28gtqllj6p7
 
   # Anything in a secrets/ directory at any depth
   - path_regex: (^|/)secrets/.*\.(ya?ml|json|env)$
-    age: age1m3fmwrw6cplwvtd8nc4wyfsu0a69rp6eckzzfh3x9keauvxh89wsc0s3lu
+    age: >-
+      age1m3fmwrw6cplwvtd8nc4wyfsu0a69rp6eckzzfh3x9keauvxh89wsc0s3lu,
+      age1nxsmvzypx40wqexkt0mcsjdzvkafj29vu954p7u3nerlsya28gtqllj6p7
 
   # Backwards-compat with what was here
   - path_regex: \.enc\.ya?ml$
-    age: age1m3fmwrw6cplwvtd8nc4wyfsu0a69rp6eckzzfh3x9keauvxh89wsc0s3lu
+    age: >-
+      age1m3fmwrw6cplwvtd8nc4wyfsu0a69rp6eckzzfh3x9keauvxh89wsc0s3lu,
+      age1nxsmvzypx40wqexkt0mcsjdzvkafj29vu954p7u3nerlsya28gtqllj6p7
