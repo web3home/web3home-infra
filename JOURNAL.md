@@ -3,6 +3,27 @@
 Order: oldest at the bottom, newest at the top.
 
 ---
+
+## 2026-05-26 — Privacy audit of repo after Phase 1
+
+**Type**: tweak · **Outcome**: clean
+
+**Why**: pre-publication sweep after pushing Phase 1 journal entries. Checking for accidentally-committed internal IPs, MAC addresses, personal paths that fingerprint the operator.
+
+**Steps**:
+- `grep -rn -E '<rfc1918 ip patterns>' --include='*.md' --include='*.yaml' ...` across all committed text files
+- `grep -rn -E '<mac address pattern>'` likewise
+- `grep -rn '/home/dm'` for user-specific paths
+
+**Result**:
+- Only IP hit: `PRIMARY_NODE_IP=192.168.1.10` in `.env.example` — generic placeholder on the 192.168.1.x range, intended. Keep.
+- No MAC addresses committed.
+- No `/home/dm` paths committed.
+
+**Convention reinforced**: local config files on individual machines (e.g. `/etc/fail2ban/jail.local`) may reference real internal IPs and never get committed. Templates and examples in the repo use the 192.168.1.x range as placeholder. Future commits of host-specific configs must redact through sops or substitute placeholders.
+
+---
+
 ## 2026-05-25 — Phase 1 complete: bee001 hardened and joined the repo
 
 **Type**: install · **Duration**: ~3 hr · **Outcome**: success
