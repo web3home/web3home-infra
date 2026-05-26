@@ -2,6 +2,52 @@
 
 Order: oldest at the bottom, newest at the top.
 
+
+
+---
+
+## 2026-05-27 — Phase 2 complete: MicroCeph cluster bootstrapped
+
+**Type**: install · **Duration**: ~1.5 hr · **Outcome**: success
+
+**Why**: stand up MicroCeph as the storage layer that will eventually host Docker volumes, CephFS, and (later) RGW object storage. Bootstrap single-node now; expand to multi-node when Odroid M1 + RPi4 join.
+
+**Versions**:
+- MicroCeph snap: `squid/stable` channel, held against auto-refresh
+- Ceph version: 19.2.3 (Squid)
+- MicroCeph git: fd93b718e2
+
+**Steps**:
+- `sudo snap install microceph --channel=squid/stable`
+- `sudo snap refresh --hold microceph` (sovereignty: control upgrade cadence)
+- `sudo microceph cluster bootstrap`
+- `sudo microceph disk add /dev/mapper/ceph-osd --wipe` — claimed the LUKS-encrypted ~1.2 TiB partition as the first OSD
+- `sudo microceph.ceph config set global osd_pool_default_size 1`
+- `sudo microceph.ceph config set global osd_pool_default_min_size 1`
+- Smoke tested via `rados put` / `rados get` using `/var/snap/microceph/common/` for I/O (snap confinement blocks `/tmp/`)
+
+**Configuration choices**:
+- Single-replica default (size=1, min_size=1) — accepted tradeoff until additional OSDs join. Documented in mute below.
+- `mon_warn_on_pool_no_redundancy false` — defensive setting; current Ceph still emits POOL_NO_REDUNDANCY warnings despite this.
+- `health mute POOL_NO_REDUNDANCY 1y --sticky` + same for `POOL_HAS_NO_REPLICAS_CONFIGURED` — keeps HEALTH_OK meaningful so real warnings (OSD down, disk near-full) stand out.
+- `mon_allow_pool_delete false` (default kept) — pool deletion requires explicit toggle each time. Defense against typos.
+
+**Verified**:
+- `microceph status`: 1 OSD up, all services (mds, mgr, mon, osd) running on bee001
+- `ceph -s`: HEALTH_OK with annotated mutes
+- `ceph osd tree`: bee001 in default root, 1.23039 weight
+- `ceph df`: 1.2 TiB raw available
+- Smoke test: 16-byte object round-tripped via `rados put` / `rados get`; `diff` confirmed byte-identical
+
+**Snap confinement gotcha** (logged for future): MicroCeph's snap cannot read `/tmp/` or other arbitrary host paths. Use `/var/snap/microceph/common/` for file I/O when feeding `rados`, `rbd`, etc.
+
+**Open items deferred**:
+- **Pool layout for actual workloads** — RBD pool for Docker volumes, CephFS pool for shared file storage, RGW pool for object storage. Decision deferred until we start the Odroid migration to know exactly what shapes of storage we need.
+- **Replication bump to 2 or 3** — when Odroid M1 + RPi4 join as OSDs.
+- **Public/cluster network separation** — currently both run on the single `enp197s0` NIC. Worth splitting when we have a 2nd NIC active.
+- **CephFS file system creation** — not needed yet; will create when first service requires shared-file semantics.
+- **RGW (S3-compatible)** — enable later if/when a service needs object storage.
+
 ---
 
 ## 2026-05-26 — Tweak: bound systemd-networkd-wait-online to first interface
