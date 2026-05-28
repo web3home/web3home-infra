@@ -1,0 +1,43 @@
+# Ghost CMS — public blog (web3home.info)
+#
+# Storage: local path on bee001 root LV (LUKS-encrypted at rest)
+# Database: SQLite (bundled with Ghost)
+# Mail: external Migadu SMTP (secrets via sops/.env)
+# TLS: terminated upstream by Traefik (initially on Odroid, eventually on bee001)
+#
+# Migrated from Odroid M1 — original lived at /srv/.../appdata/website/ghost
+# Local path on bee001 chosen instead of Ceph: single-OSD cluster has no
+# replication benefit yet; revisit when cluster has 2+ OSDs.
+
+services:
+  ghost:
+    image: ghost:5-alpine
+    container_name: ghost-cms
+    restart: unless-stopped
+    environment:
+      url: https://web3home.info
+      database__client: sqlite3
+      database__connection__filename: /var/lib/ghost/content/data/ghost.db
+      mail__transport: SMTP
+      mail__options__host: smtp.migadu.com
+      mail__options__port: 587
+      mail__options__secure: false
+      mail__options__auth__user: ${GHOST_SMTP_USER}
+      mail__options__auth__pass: ${GHOST_SMTP_PASS}
+      mail__from: noreply@web3home.info
+    volumes:
+      - /srv/dm/services/ghost/content:/var/lib/ghost/content
+    ports:
+      - "${GHOST_BIND_IP:-127.0.0.1}:2368:2368"
+    expose:
+      - "2368"
+    networks:
+      - traefik
+    # Traefik labels intentionally omitted for the bee001 migration phase.
+    # During Phase β, Traefik on Odroid points to bee001:2368 directly.
+    # Once Traefik moves to bee001, labels are restored.
+
+networks:
+  traefik:
+    external: true
+    name: traefik

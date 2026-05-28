@@ -6,6 +6,73 @@ Order: oldest at the bottom, newest at the top.
 
 ---
 
+## 2026-05-28 — Phase 3 step 1: Ghost migrated to bee001
+
+**Type**: migration · **Duration**: ~2 hr (incl. detours) · **Outcome**: success
+
+**Why**: first service migration from Odroid M1 to bee001. Ghost chosen as lowest-risk (public blog, ~127 MB, SQLite, no DB container).
+
+**Approach**: Option β — keep Traefik on Odroid; move only Ghost's process + data to bee001; point Odroid's Traefik at bee001 via file-provider route. Avoids migrating Traefik prematurely.
+
+**Steps**:
+- Installed Docker CE on bee001 from Docker's official apt repo (Engine 29.5.2, Compose v5.1.4, Buildx 0.34.1); verified GPG fingerprint 9DC8…CD88
+- Set up bee001→Odroid SSH key auth (new dedicated `id_ed25519` key, separate from GitHub key)
+- rsync'd Ghost content (~127 MB, 565 files) from Odroid to `/srv/dm/services/ghost/content/` on bee001
+- UID match confirmed (both `dm` and Ghost-in-container are 1000) — no chown needed
+- Wrote sanitized `docker/ghost/compose.yaml` + `.env.example` + `README.md`; real SMTP creds + bind IP in gitignored `.env`
+- Created `traefik` docker network on bee001; brought Ghost up; smoke-tested via curl with Host header (correct 301→https, real content rendered)
+- Added `ghost-bee001` router + service to Odroid's Traefik file provider (`dynamic.yml`), pointing at bee001:2368, priority 100, with `security-headers` + `rate-limit` middlewares + `modern@file` TLS
+- Bound bee001's Ghost port to LAN IP only via `${GHOST_BIND_IP}` env var (Docker-bypasses-UFW gotcha noted)
+- Stopped Ghost on Odroid; verified site still served (now exclusively bee001)
+
+**Verified**:
+- `https://web3home.info/` returns HTTP/2 200 via Cloudflare → Odroid Traefik → bee001 Ghost
+- Security headers present in response (HSTS, X-Frame-Options, CSP middleware applied)
+- bee001 Ghost logs show real external traffic (200s on pages, assets, member API)
+- Odroid Ghost container `Exited (0)`
+
+**Incidents**:
+- Stopped Odroid's Ghost BEFORE adding the file-provider route → 404 for a few minutes. Recovered by restarting Odroid Ghost, then doing the cutover in the correct order (add route → verify → stop old). Lesson: for label-based routes, the fallback route must exist before removing the source.
+- First `dynamic.yml` edit accidentally overwrote the `headscale` service URL (pointed it at Ghost). Caught via Traefik logs (`service ghost-bee001 does not exist`), fixed by restoring `http://headscale:8080` and adding `ghost-bee001` as a proper sibling.
+
+**Decisions**:
+- Delta rsync skipped — Odroid Ghost only ran briefly post-initial-sync during recovery; only ephemeral data (sessions, view counts, logs) differed, no real content. Initial rsync had 100% of content.
+- Local storage on bee001, not Ceph — single-OSD cluster has no replication benefit yet. Move to CephFS/RBD when cluster has 2+ OSDs.
+
+**Known issues deferred**:
+- Pre-existing Traefik warning on Odroid: `headscale` + `headscale-grpc` routers "cannot be linked automatically with multiple Services." Predates this work. Fix during Headscale migration.
+- Docker port-publishing bypasses UFW; mitigated by binding to specific LAN IP. Full fix when Ghost moves onto internal Docker network (no published ports) at Traefik migration.
+- bee001 Ghost has no restic backup yet. Acceptable for Ghost (not actively writing). MUST set up restic-on-bee001 before Vaultwarden/Nextcloud migrations.
+
+**Rollback path** (still available during bake): restart Ghost on Odroid (`docker start ghost-cms`), remove `ghost-bee001` route from Odroid's `dynamic.yml`. Odroid data untouched, still in restic snapshots.
+
+---
+
+## 2026-05-27 — Discovered existing restic backup infrastructure
+
+**Type**: external · **Outcome**: noted, no action
+
+**Why**: during Ghost migration planning, inventory revealed an existing restic backup setup. Updating mental model + agent context.
+
+**Configuration**:
+- Source: Odroid M1 (`/opt`, `/etc`, `/srv`, `/mnt/nvme`)
+- Target: dedicated Raspberry Pi at internal IP, `restic` over SFTP
+- Retention: 7 daily, 4 weekly, 12 monthly, 2 yearly
+- Weekly integrity check (5% data subset) on Sundays
+- ~600 GB current snapshot size
+- Script: `/usr/local/bin/restic-backup-secure.sh` on Odroid
+- Container-based execution (`restic/restic:latest`)
+
+**Implications**:
+- Provides an off-machine recovery path for everything on Odroid
+- Migration phase risk reduced — restored data is the ultimate fallback
+- The backup Pi is currently performing a critical role; treat as untouchable infrastructure during migration
+- Decision deferred: when Odroid is eventually wiped and rejoins as a Ceph node, the backup script needs to live somewhere (bee001 likely) and point at a new source list
+
+**Sovereignty alignment**: ✓ — self-hosted backup target on owned hardware; encrypted via restic password file; off-host (different physical device); regularly verified.
+
+---
+
 ## 2026-05-27 — Phase 2 complete: MicroCeph cluster bootstrapped
 
 **Type**: install · **Duration**: ~1.5 hr · **Outcome**: success
