@@ -1,0 +1,83 @@
+# Nextcloud — migrated from Odroid M1 (ARM64) to bee001 (amd64)
+#
+# Storage: CephFS-backed (/srv/dm/ceph/nextcloud/*), LUKS-encrypted OSD underneath
+# Database: MariaDB (restored from Odroid dump). Postgres conversion is a later step.
+# Image: official nextcloud:32 (multi-arch -> amd64). NOT the custom -pdlib build.
+#   Consequence: no pdlib face-recognition; Memories ARM binaries disabled in config.
+# TLS: terminated upstream by Traefik on Odroid (file-route), same pattern as Ghost.
+# No GPU passthrough yet, no AppAPI, no Traefik labels (file-provider route instead).
+
+services:
+  db:
+    image: mariadb:10.11
+    container_name: nextcloud-db
+    restart: unless-stopped
+    command: --transaction-isolation=READ-COMMITTED --binlog-format=ROW
+    volumes:
+      - /srv/dm/ceph/nextcloud/db:/var/lib/mysql
+    environment:
+      MYSQL_ROOT_PASSWORD: "${MYSQL_ROOT_PASSWORD}"
+      MYSQL_PASSWORD: "${MYSQL_PASSWORD}"
+      MYSQL_DATABASE: "${MYSQL_DATABASE}"
+      MYSQL_USER: "${MYSQL_USER}"
+    networks:
+      - nextcloud-internal
+
+  redis:
+    image: redis:latest
+    container_name: nextcloud-redis
+    restart: unless-stopped
+    command: redis-server --appendonly yes
+    volumes:
+      - /srv/dm/ceph/nextcloud/redis:/data
+    networks:
+      - nextcloud-internal
+
+  app:
+    image: nextcloud:32
+    container_name: nextcloud-app
+    restart: unless-stopped
+    depends_on:
+      - db
+      - redis
+    volumes:
+      - /srv/dm/ceph/nextcloud/html:/var/www/html
+      - /srv/dm/ceph/nextcloud/data:/var/www/html/data
+    environment:
+      MYSQL_HOST: db
+      MYSQL_DATABASE: "${MYSQL_DATABASE}"
+      MYSQL_USER: "${MYSQL_USER}"
+      MYSQL_PASSWORD: "${MYSQL_PASSWORD}"
+      REDIS_HOST: redis
+      PHP_MEMORY_LIMIT: 2048M
+      PHP_UPLOAD_LIMIT: 32G
+      OVERWRITEPROTOCOL: https
+      OVERWRITEHOST: nextcloud003.web3home.info
+      OVERWRITECLIURL: https://nextcloud003.web3home.info
+      APACHE_SERVER_NAME: nextcloud003.web3home.info
+    ports:
+      - "${NC_BIND_IP:-127.0.0.1}:8080:80"
+    networks:
+      - nextcloud-internal
+      - traefik
+
+  cron:
+    image: nextcloud:32
+    container_name: nextcloud-cron
+    restart: unless-stopped
+    depends_on:
+      - db
+      - redis
+    volumes:
+      - /srv/dm/ceph/nextcloud/html:/var/www/html
+      - /srv/dm/ceph/nextcloud/data:/var/www/html/data
+    entrypoint: /cron.sh
+    networks:
+      - nextcloud-internal
+
+networks:
+  traefik:
+    external: true
+    name: traefik
+  nextcloud-internal:
+    driver: bridge
