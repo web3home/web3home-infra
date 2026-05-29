@@ -1,0 +1,10 @@
+[Unit]
+Description=Restic backup to RPi4
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/opt/web3home/bin/restic-backup.sh
+Nice=10
+IOSchedulingClass=idle
