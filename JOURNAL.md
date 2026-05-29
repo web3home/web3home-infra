@@ -2,7 +2,32 @@
 
 Order: oldest at the bottom, newest at the top.
 
+## 2026-05-29 — Phase 3: Nextcloud migrated to bee001 (the big one)
 
+**Type**: migration · **Outcome**: success, verified end-to-end
+
+**Why**: largest service (~573 GB, 4 users, custom image). Migrated Odroid M1 (ARM64) → bee001 (amd64), data onto CephFS.
+
+**Approach**: maintenance-mode freeze on Odroid → logical DB dump → rsync user files (excl. caches) → restore into fresh MariaDB on bee001 → official image upgrade → Traefik file-route cutover → stop Odroid stack (rollback intact).
+
+**Key decisions**:
+- **CephFS for data** — Nextcloud is the first service big enough to justify the Ceph OSD. Created `cephfs` filesystem (single-replica pools, size 1), mounted at /srv/dm/ceph. Data, html, db, redis all under /srv/dm/ceph/nextcloud/.
+- **Official `nextcloud:32`** instead of the custom `nextcloud:32-pdlib` — gains amd64, loses pdlib face-recognition. Memories ARM binaries (exiftool-aarch64, go-vod-aarch64) commented out in config.
+- **Excluded appdata cache** from rsync — 720k+ preview/thumbnail files are regenerable. Copied only ~167k real user files (573 GB). Filecache (904k entries) reconciles; previews regenerate on demand.
+- **MariaDB kept for now**, Postgres conversion deferred — instance complexity warranted one-risk-at-a-time. (Postgres conversion = next-session task.)
+- **No GPU passthrough yet** — bee001 AMD GPU is card1 + renderD128 (groups video=44, render=991, NO /dev/video* nodes unlike Odroid). Deferred.
+
+**Incidents**:
+- First file rsync filled root LV (200G) — data was going to /srv on root, not Ceph. Root hit 100%. Fixed: set up CephFS, redirected to /srv/dm/ceph (1.2 TiB).
+- Created two CephFS filesystems by accident (naming back-and-forth) → HEALTH_ERR (one MDS can't serve two FS). Fixed: deleted extra FS + pools.
+- `mon_allow_pool_size_one` needed setting before size-1 pools allowed (EPERM otherwise).
+- **MYSQL_ROOT_PASSWORD with `$` broke Docker Compose** — `$changeit` interpreted as variable, truncated the password silently. MariaDB initialized with wrong password. Fixed: changed `$`→`@`, wiped db dir, reinit. Lesson: alphanumeric-only passwords in .env.
+- Config dir not writable — CephFS files owned by dm (1000), official image runs as www-data (33). Fixed: chown -R 33:33 (fast on CephFS — metadata-only).
+- Version bump 32.0.5 → 32.0.10 (image newer than data) → ran `occ upgrade`, clean.
+
+**Verified**: status.php 200 via Cloudflare→Traefik→bee001; all 4 users list; files:scan saleere = 8 folders/49 files/0 errors; files readable inside container; external HTTPS works; [browser login confirmed].
+
+**Deferred**: Postgres conversion · GPU passthrough · Memories amd64 binaries · restic coverage of /srv/dm/ceph/nextcloud (currently restic only covers /srv/dm/services) · decommission Odroid Nextcloud after bake.
 
 ---
 
