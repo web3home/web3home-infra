@@ -6,6 +6,36 @@ Order: oldest at the bottom, newest at the top.
 
 ---
 
+## 2026-05-29 — restic backup on bee001 (prerequisite for further migrations)
+
+**Type**: install · **Outcome**: success, restore-verified
+
+**Why**: bee001 had no backup. Required before migrating data-bearing services (Vaultwarden, Nextcloud). Established as a hard gate in the migration plan.
+
+**Design**:
+- **Native restic** (not containerized like Odroid's) — backups don't depend on Docker being healthy; simpler script; single static binary
+- **Separate repo** `bee001-backups` on the RPi4 (decision B) — distinct encryption password from Odroid's repo; cleaner when RPi4 is later repurposed
+- restic 0.18.1 from Ubuntu apt (matches upstream; repo backward-compat covers any drift)
+
+**Secrets**:
+- Repo password: `/root/.restic-password-bee001` (0400, root-only, on LUKS disk); copy in password manager; durable record committed sops-encrypted at `secrets/restic.sops.yaml`
+- Root SSH key `/root/.ssh/id_ed25519_restic` authorized on RPi4 for unattended root-run backups (root reaching into /home/dm/.ssh would be fragile)
+
+**Backup scope**: `/srv/dm/services`, `/etc`, `/opt/web3home`. Excludes logs/tmp/cache.
+
+**Schedule**: systemd timer daily 03:30 + RandomizedDelaySec 900, Persistent=true (runs at next boot if missed). Nice=10, IOSchedulingClass=idle. Sunday integrity check (5% data subset). Retention 7d/4w/12m/2y.
+
+**Verified**:
+- First backup: snapshot `5f87733c`, 1632 files, 93 MiB → 34.5 MiB stored (dedup+compression)
+- **Restore tested**: restored ghost.db to scratch, `cmp` confirmed byte-identical to live
+- Timer armed and listed
+
+**Committed**: `system/restic/` (script + service + timer, IPs sanitized to placeholders), `secrets/restic.sops.yaml`.
+
+**Note**: when Odroid is decommissioned and RPi4 repurposed as a Ceph node, this backup target must relocate (bee001 local + off-host USB, or cloud backend like B2). Deferred to Phase 4.
+
+---
+
 ## 2026-05-28 — Phase 3 step 1: Ghost migrated to bee001
 
 **Type**: migration · **Duration**: ~2 hr (incl. detours) · **Outcome**: success
