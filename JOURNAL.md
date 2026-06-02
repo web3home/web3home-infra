@@ -1,3 +1,60 @@
+## 2026-06-01 — Reboot exposed CephFS non-persistence; recovered, mount now durable
+
+**Type**: incident · **Outcome**: resolved, zero data loss, root cause fixed
+
+**Why**: a kisak-mesa upgrade (for GPU work) pulled a new kernel + microcode, requiring a reboot. The reboot surfaced a latent gap: CephFS at /srv/dm/ceph was mounted MANUALLY during migration and never persisted (no fstab/systemd unit). It did not remount at boot.
+
+**Incident chain**:
+- Shutdown hung on `libceph: connect …:6789 error -101` (CephFS couldn't unmount cleanly — network torn down first); redis task blocked >122s. Required hard power-cycle.
+- Boot: Ceph recovered to HEALTH_OK on its own (unclean-shutdown MDS journal replay), but /srv/dm/ceph did NOT mount.
+- Nextcloud containers, finding the mountpoint empty, bootstrapped a FRESH BLANK install into the root-LV dir (809M html + 137M new MariaDB + CAN_INSTALL). No user data written; caught before anyone logged in.
+
+**Recovery (ordered, rollback-safe)**:
+- Stopped Nextcloud stack (ghost untouched).
+- Verified real data via TEMP mount at /mnt/ceph-verify: 551G, instanceid oc42e0t3b65v, v32.0.10.1 — confirmed intact in Ceph before touching anything.
+- Moved blank install aside → /srv/dm/ceph/nextcloud.shadow-blank-2026-06-01 (now shadowed under the mount; delete after bake).
+- Mounted real CephFS at /srv/dm/ceph.
+
+**Root-cause fix**:
+- Created systemd mount unit `/etc/systemd/system/srv-dm-ceph.mount` (Type=ceph, _netdev, After microceph daemon). Enabled.
+- Docker drop-in `docker.service.d/10-wait-cephfs.conf`: `RequiresMountsFor=/srv/dm/ceph` + `After=srv-dm-ceph.mount` — Docker now waits for the mount, so containers can never again init into an empty path.
+- Verified: systemd unmount→start cycle works; mount survives by design now.
+
+**Verified post-recovery**: 4 users, 1,019,464 files, 65 shares, maintenance:false, redis locking active, external HTTPS admin API returns 200.
+
+**SECURITY TODO (priority)**: client.admin Ceph key was printed to terminal/logs during diagnosis (`ceph auth ls`). Rotate the admin key and scrub history when convenient.
+
+**Deferred / cleanup**:
+- Delete shadow-blank-2026-06-01 after bake (~950M reclaim).
+- Mount unit uses zero-placeholder FSID (`admin@.cephfs=`); works via mon_addr resolution. Optionally pin real FSID 785f2ea5-… for robustness.
+- restic systemd service has no $HOME → cache disabled (slower). Set RESTIC_CACHE_DIR/HOME in unit.
+- Guard against manual/timer restic collision (flock).
+- Commit sanitized restic + mount-unit changes to repo.
+
+**GPU/HTPC detour (SOLVED — was a permissions issue, not a driver gap)**: The all-night "llvmpipe only" symptom was NOT missing Strix Halo support. RADV fully drives GFX1151 on the installed kisak Mesa 26.1.1 — confirmed `Radeon 8060S Graphics (RADV STRIX_HALO)`. Root cause: `/dev/dri/renderD128` is `root:render` mode `crw-rw----`, and user `dm` was in neither `render` (991) nor `video` (44), so every non-root Vulkan call hit `Permission denied` → llvmpipe fallback. Fix: `usermod -aG render,video dm` + re-login. Now works as `dm`, no sudo. The kisak Mesa upgrade + new kernel/reboot were not strictly needed for detection (kept anyway; fine).
+
+**NEXT SESSION — clean starting task (HTPC build on a working GPU base)**: install KDE Plasma + SDDM + Steam + Kodi for the living-room/Samsung-TV setup. Foundation verified: amdgpu bound, RADV exposes 8060S to `dm`, `/games` LUVS volume mounted (280G free), Steam needs multilib (already enabled). Reminder: streaming-service DRM (Netflix etc.) caps at 1080p on Linux — local media + YouTube fine. Consider setting default target back to multi-user.target and starting the desktop on demand to keep the server clean.
+
+**Type**: backup · **Outcome**: success, restore-verified
+
+**Why**: migrated Nextcloud data (~540 GiB on single-OSD CephFS) had no bee001-side backup — the open gap from the 05-29 migration. Hard gate before any Postgres conversion or Odroid decommission.
+
+**Changes** (`/opt/web3home/bin/restic-backup.sh`, backup at `.bak-2026-05-31`):
+- Added `/srv/dm/ceph/nextcloud` to BACKUP_PATHS.
+- Pre-backup logical DB dump: `mariadb-dump --single-transaction` from `nextcloud-db` → `/srv/dm/services/nextcloud-db/nextcloud.sql` (root LV, already in backup scope, Ceph-independent). Temp-then-rename + completion-marker check; truncated dump = fatal.
+- Excludes: live `db/` (use the dump instead), `redis/` (cache), `data/appdata_*/preview` (regenerable).
+
+**Verified**: seed snapshot `4cf255ee` (538.839 GiB, 212k files); overnight incremental `d4017edb` (+62 GiB, dedup confirmed). Restore test from `d4017edb`: DB dump parses (214 tables, completion marker); user file sha256 + cmp byte-identical to live.
+
+**Incidents**:
+- Concurrent runs: 14h manual seed overlapped the 03:42 timer → manual run's prune hit a repo lock (no data harm; both snapshots clean).
+- Timer runs as systemd service with no `$HOME` → `unable to open cache` warnings. Backups fine, but cache disabled = slower. TODO below.
+
+**Deferred / TODO**:
+- Fix systemd cache: set `HOME` or `RESTIC_CACHE_DIR` in the service unit.
+- Prevent manual/timer collision (flock wrapper, or just don't run manually near 03:30).
+- Commit sanitized script changes to repo (placeholder IP).
+- Still pending downstream: MariaDB→Postgres conversion (now has its rollback), Odroid Nextcloud decommission (only after a bake period — NOT yet).
 # Journal entries
 
 Order: oldest at the bottom, newest at the top.
