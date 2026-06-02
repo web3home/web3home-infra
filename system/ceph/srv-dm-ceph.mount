@@ -1,0 +1,15 @@
+[Unit]
+Description=CephFS mount for /srv/dm/ceph (Nextcloud data)
+After=network-online.target snap.microceph.daemon.service
+Wants=network-online.target
+Requires=snap.microceph.daemon.service
+
+[Mount]
+What=admin@.cephfs=/
+Where=/srv/dm/ceph
+Type=ceph
+Options=mon_addr=192.168.1.10,secretfile=/etc/ceph/admin.secret,_netdev
+TimeoutSec=60
+
+[Install]
+WantedBy=multi-user.target
