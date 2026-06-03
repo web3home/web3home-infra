@@ -1,0 +1,50 @@
+services:
+  llama-server:
+    image: ghcr.io/ggml-org/llama.cpp:server-vulkan
+    container_name: llama-server
+    restart: unless-stopped
+    devices:
+      - /dev/dri/renderD128
+      - /dev/dri/card1
+    group_add:
+      - "991"   # render (host GID)
+      - "44"    # video  (host GID)
+    volumes:
+      - /srv/dm/ceph/llm/models:/models:ro
+    command: >
+      -m /models/Qwen_Qwen3.6-35B-A3B-Q4_K_M.gguf
+      -ngl 99
+      -fa on
+      -c 8192
+      --host 0.0.0.0
+      --port 8000
+      --alias qwen3.6-35b-a3b
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 120s
+    networks:
+      - llm-internal
+
+  open-webui:
+    image: ghcr.io/open-webui/open-webui:latest
+    container_name: open-webui
+    restart: unless-stopped
+    depends_on:
+      - llama-server
+    environment:
+      - OPENAI_API_BASE_URL=http://llama-server:8000/v1
+      - OPENAI_API_KEY=sk-noauth   # llama-server ignores it, but WebUI requires a value
+      - WEBUI_AUTH=True
+    volumes:
+      - /srv/dm/ceph/llm/webui-data:/app/backend/data
+    ports:
+      - "3000:8080"
+    networks:
+      - llm-internal
+
+networks:
+  llm-internal:
+    driver: bridge

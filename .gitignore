@@ -23,3 +23,7 @@ age.key
 # Local-only working files
 scratch/
 tmp/
+
+# LLM model weights — large, re-downloadable, never commit
+*.gguf
+docker/llm/models/

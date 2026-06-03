@@ -11,7 +11,7 @@ live under `/etc/systemd/system/`. To install on a host:
 2. Copy `docker-wait-cephfs.conf` → `/etc/systemd/system/docker.service.d/10-wait-cephfs.conf`.
 3. **Replace placeholder IPs with real values**: `mon_addr=192.168.1.10`
    is a placeholder — set the real Ceph monitor address. The mount reads
-   the key from `secretfile=/etc/ceph/admin.secret` (created out-of-band,
+   the key from `secretfile=/etc/ceph/nextcloud.secret` (created out-of-band,
    never committed).
 4. `sudo systemctl daemon-reload`
 5. `sudo systemctl enable --now srv-dm-ceph.mount`

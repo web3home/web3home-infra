@@ -71,6 +71,7 @@ if restic backup "${BACKUP_PATHS[@]}" \
     --exclude='/srv/dm/ceph/nextcloud/db' \
     --exclude='/srv/dm/ceph/nextcloud/redis' \
     --exclude='/srv/dm/ceph/nextcloud/data/appdata_*/preview' \
+    --exclude='/srv/dm/ceph/llm/models' \
     --verbose 2>&1 | tee -a "$LOGFILE"; then
 
   log "Backup OK. Pruning per retention policy..."
