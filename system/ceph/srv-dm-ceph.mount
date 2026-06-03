@@ -5,10 +5,10 @@ Wants=network-online.target
 Requires=snap.microceph.daemon.service
 
 [Mount]
-What=admin@.cephfs=/
+What=nextcloud@.cephfs=/
 Where=/srv/dm/ceph
 Type=ceph
-Options=mon_addr=192.168.1.10,secretfile=/etc/ceph/admin.secret,_netdev
+Options=mon_addr=192.168.1.10,secretfile=/etc/ceph/nextcloud.secret,_netdev
 TimeoutSec=60
 
 [Install]
