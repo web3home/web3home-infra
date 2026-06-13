@@ -1,0 +1,18 @@
+[Unit]
+Description=Wait until CephFS has an active MDS before mounting
+After=network-online.target snap.microceph.daemon.service snap.microceph.mon.service snap.microceph.mds.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+# Authoritative readiness: the cluster map must show an active MDS.
+# Generous 180s window covers MDS journal replay after unclean shutdowns.
+ExecStart=/bin/bash -c 'for i in $(seq 1 90); do \
+  if /snap/bin/microceph.ceph mds stat 2>/dev/null | grep -q "up:active"; then \
+    echo "ceph MDS up:active"; exit 0; fi; \
+  sleep 2; done; echo "no active MDS after 180s"; exit 1'
+TimeoutStartSec=200
+
+[Install]
+WantedBy=multi-user.target

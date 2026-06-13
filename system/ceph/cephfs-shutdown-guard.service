@@ -1,0 +1,20 @@
+[Unit]
+Description=Kill containers and unmount CephFS before network teardown
+DefaultDependencies=no
+After=network.target network-online.target docker.service
+Before=shutdown.target
+Conflicts=shutdown.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/bin/true
+# Only act during real shutdown, not an accidental manual restart
+ExecStop=/bin/bash -c '\
+  systemctl list-jobs 2>/dev/null | grep -qE "shutdown.target|reboot.target|halt.target" || exit 0; \
+  /usr/bin/docker kill $(/usr/bin/docker ps -q) 2>/dev/null || true; \
+  /usr/bin/umount -f /srv/dm/ceph 2>/dev/null || /usr/bin/umount -l /srv/dm/ceph 2>/dev/null || true'
+TimeoutStopSec=45
+
+[Install]
+WantedBy=multi-user.target

@@ -8,8 +8,8 @@ Requires=snap.microceph.daemon.service
 What=nextcloud@.cephfs=/
 Where=/srv/dm/ceph
 Type=ceph
-Options=mon_addr=192.168.1.10,secretfile=/etc/ceph/nextcloud.secret,_netdev
-TimeoutSec=60
+Options=mon_addr=192.0.2.10,secretfile=/etc/ceph/nextcloud.secret,_netdev
+TimeoutSec=300
 
 [Install]
 WantedBy=multi-user.target

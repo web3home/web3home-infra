@@ -1,3 +1,49 @@
+## 2026-06-13 — Fix B COMPLETE: bee001 reboots cleanly unattended (battle-tested)
+
+**Result:** full clean reboot cycle proven — shutdown completes on its own,
+box power-cycles, LUKS auto-unlocks, CephFS auto-mounts first try, Docker +
+all containers auto-start, HEALTH_OK. Zero manual touches. The multi-session
+reboot ordeal is closed.
+
+### What finally worked
+
+- **cephfs-shutdown-guard.service** — the key fix was `docker kill` (instant
+  SIGKILL) instead of `docker stop` (waits ~10s/container → blew past the 90s
+  TimeoutStopSec → systemd SIGKILLed the guard mid-run → redis survived into
+  the final sd-sync → wedge). Fast-kill finishes in ~1s. Also: ordered
+  `After=network.target network-online.target docker.service` so ExecStop runs
+  while the network is still up (clean unmount, no -101 retry storm), plus a
+  shutdown-only guard clause (`list-jobs | grep shutdown/reboot || exit 0`) so
+  an accidental `systemctl restart` no longer tears down production.
+- **wait-for-ceph-mon.service** — boot gate now polls for an **active MDS**
+  (`microceph.ceph mds stat | grep up:active`), not bare TCP on :6789. The mon
+  port answers ~3s before the MDS is mountable; the old TCP poll passed too
+  early and the mount failed with "no mds is up". 180s window also covers MDS
+  journal replay after an unclean boot.
+
+### Hard-won lessons (now in the guide)
+
+- A unit whose ExecStop is destructive must early-exit unless the system is
+  truly shutting down — never `restart` it casually (tore down prod twice).
+- `docker stop` is too slow for shutdown guards; `docker kill` + force-unmount.
+- CephFS mount readiness = active MDS, not mon TCP reachability.
+- Always `systemd-analyze verify default.target` after unit edits — a
+  Before=network.target + After=mount combo silently deletes network.target.
+
+### Committed this session
+
+system/ceph/: cephfs-shutdown-guard.service, wait-for-ceph-mon.service,
+srv-dm-ceph.mount (updated), 10-wait-for-mon.conf — all battle-tested before
+commit. Plus docs/SOVEREIGNTY-NODE.md (the build guide).
+
+### Still open (roadmap, not blockers)
+
+- dropbear-initramfs for remote LUKS unlock (still needed before remote reboot).
+- Boot still needs the physical LUKS passphrase — dropbear is the fix.
+- Phase 2–4: Headscale+Traefik migration to node 1, 3-node Ceph + replication,
+  Cloudflare exit. Remaining service migrations: Vaultwarden, Nostr, Mattermost,
+  Home Assistant.
+- Microcode 0x0b700037 still not loading across reboots (low priority).
 ## 2026-06-01 — Reboot exposed CephFS non-persistence; recovered, mount now durable
 
 **Type**: incident · **Outcome**: resolved, zero data loss, root cause fixed
