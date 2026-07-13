@@ -1,0 +1,12 @@
+# Hardened dropbear-initramfs options for remote LUKS unlock.
+# Live file: /etc/dropbear/initramfs/dropbear.conf (new layout, Debian 12+/Ubuntu 24.04+).
+#
+# -R  : generate ephemeral host keys each boot (boot partition is unencrypted /
+#       untrusted, so persistent keys there give false assurance; accept the
+#       host-key prompt each unlock)
+# -s  : disable password auth (key-only)
+# -j -k : disable local/remote port forwarding
+# -c cryptroot-unlock : forced command — an authenticated session can ONLY
+#       unlock the disk, no shell
+# -p 2222 : non-standard port (keeps initramfs SSH off :22)
+DROPBEAR_OPTIONS="-R -s -j -k -c cryptroot-unlock -p 2222"

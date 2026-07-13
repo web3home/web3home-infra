@@ -1,3 +1,73 @@
+## 2026-07-13 — P1 dropbear DONE; power-outage post-mortem; NC 33; vision + image-gen
+
+**Result:** remote LUKS unlock over SSH proven working (LAN scope). The
+roadmap's top item is closed. Also: post-mortem on the Jul 10 power outage
+that revealed a dirty-shutdown boot-recovery gap (documented, not yet fixed).
+
+### Power outage (Jul 10) — post-mortem
+
+Shared power loss killed bee001 + Odroid. Entered LUKS at the TV, walked away —
+**services were down ~8h and I didn't know.** Journal-confirmed chain:
+
+- Unclean shutdown → `cephfs-shutdown-guard` never ran (no `docker kill`).
+- `wait-for-ceph-mon` reported MDS `up:active` and passed, but the mount fired
+  17s later with `no mds is up`. **The gate checks MDS status, not actual
+  mountability — the two diverge after a dirty shutdown during MDS recovery.**
+- `web3home-stacks` hit `Dependency failed` (mount failed) and **died
+  permanently — no retry.**
+- Recovery at 03:45 was **accidental**: `restic-backup.timer` fired, its
+  `RequiresMountsFor=/srv/dm/ceph` re-triggered the mount (Ceph stable by then),
+  Docker followed, containers restored via `unless-stopped` (power-loss left
+  them "running", so unlike a clean shutdown they auto-restored).
+
+### KNOWN OPEN ISSUE — dirty-shutdown boot recovery not solid
+
+Clean reboots work (Fix B). Unclean shutdowns do not recover reliably. Fix
+designed, NOT yet implemented:
+- mount `OnFailure=` → retry helper (systemd has no native mount retry; this is
+  the maintainer-recommended pattern, issue #16811/#4468).
+- harden the gate to test real FS reachability (stat), not just MDS status.
+- make `web3home-stacks` self-heal when the mount comes up late.
+Needs power-cut testing — now safe to test because dropbear exists.
+
+### P1 dropbear-initramfs — DONE (LAN scope)
+
+- New layout `/etc/dropbear/initramfs/`. Options: `-R` (ephemeral host keys —
+  /boot is unencrypted/untrusted, persistent keys give false assurance),
+  `-s -j -k -c cryptroot-unlock -p 2222`.
+- ed25519 unlock key generated **on the laptop** (first attempt failed: key was
+  generated on the wrong machine — the private half must live on the client).
+- Static `ip=`, NOT DHCP — outage-hardened (router may not serve leases when
+  box + router co-boot after power loss).
+- r8169 module + rtl_nic firmware confirmed in initramfs. `update-initramfs -u
+  -k all` (was on -22, -27 staged; covers GRUB fallback).
+- **Scope: LAN only.** dropbear predates the mesh, so no internet-scope unlock.
+  That's a separate, security-sensitive decision tied to the network migration.
+- Docs: `system/dropbear/` (credential files gitignored, never committed).
+
+### Fix B correction — "proven" was half true
+
+Earlier marked "zero manual touches, proven." The systemd gate chain worked,
+but **containers never auto-started**: `docker kill` at shutdown sets
+desired-state=stopped, and `unless-stopped` honors that → containers stay down
+until an explicit `compose up`. Real fix: `web3home-stacks.service` (oneshot
+`compose up -d`, `.boot-enabled` marker-gated, no ExecStop so the shutdown
+guard still owns teardown). Now reboot-proven repeatedly incl. an apt-upgrade
+reboot (uptime == container age). Docs: `system/systemd/`.
+
+### Other
+
+- Nextcloud 32 → 33 (33.0.5; `occ upgrade` ran clean on container restart).
+- Qwen3.6-35B-A3B vision enabled: bartowski `mmproj-f16` via `--mmproj`.
+  (Model is multimodal; projector ships separately — text worked, images 503'd
+  until the mmproj was loaded.)
+- ComfyUI/ROCm image-gen working: hec-ovi gfx1151 image, 103GB unified VRAM
+  visible, SDXL generates, GPU releases to 0 after (no D-state hang). Isolated
+  (restart=no, not in boot set). LTX-2.3 video PARKED — OOM'd the 128GB pool
+  when stacked with LLM + spleeter. Needs LLM-parked + offload flags +
+  custom_nodes persistence mount. Unified memory is shared: big video model +
+  running LLM > 128GB → OOM-killer took both.
+
 ## 2026-06-13 — Fix B COMPLETE: bee001 reboots cleanly unattended (battle-tested)
 
 **Result:** full clean reboot cycle proven — shutdown completes on its own,

@@ -2,8 +2,9 @@
 #
 # Storage: CephFS-backed (/srv/dm/ceph/nextcloud/*), LUKS-encrypted OSD underneath
 # Database: MariaDB (restored from Odroid dump). Postgres conversion is a later step.
-# Image: official nextcloud:32 (multi-arch -> amd64). NOT the custom -pdlib build.
+# Image: official nextcloud:33 (multi-arch -> amd64). NOT the custom -pdlib build.
 #   Consequence: no pdlib face-recognition; Memories ARM binaries disabled in config.
+#   Upgraded 32 -> 33 (33.0.5); occ upgrade ran clean on container restart.
 # TLS: terminated upstream by Traefik on Odroid (file-route), same pattern as Ghost.
 # No GPU passthrough yet, no AppAPI, no Traefik labels (file-provider route instead).
 
@@ -34,7 +35,7 @@ services:
       - nextcloud-internal
 
   app:
-    image: nextcloud:32
+    image: nextcloud:33
     container_name: nextcloud-app
     restart: unless-stopped
     depends_on:
@@ -49,7 +50,7 @@ services:
       MYSQL_USER: "${MYSQL_USER}"
       MYSQL_PASSWORD: "${MYSQL_PASSWORD}"
       REDIS_HOST: redis
-      PHP_MEMORY_LIMIT: 2048M
+      PHP_MEMORY_LIMIT: 4096M
       PHP_UPLOAD_LIMIT: 32G
       OVERWRITEPROTOCOL: https
       OVERWRITEHOST: nextcloud003.web3home.info
@@ -62,7 +63,7 @@ services:
       - traefik
 
   cron:
-    image: nextcloud:32
+    image: nextcloud:33
     container_name: nextcloud-cron
     restart: unless-stopped
     depends_on:

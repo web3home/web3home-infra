@@ -150,9 +150,11 @@ must be `nofail` so a storage hiccup never blocks boot.
    lvm vgchange -ay ubuntu-vg
    exit                                           # boot resumes
    ```
-3. ❌ **Remote LUKS unlock (dropbear-initramfs): NOT yet installed.**
-   Until it is, any reboot requires physical console access. Do not reboot
-   this node remotely.
+3. ✅ **Remote LUKS unlock (dropbear-initramfs): DONE — LAN scope.**
+   Unlock the LUKS root over SSH at early boot (`-R` ephemeral host keys,
+   key-only, forced `cryptroot-unlock`, port 2222, static IP). Works from the
+   LAN only — dropbear predates the mesh, so no internet-scope unlock yet.
+   See `system/dropbear/`.
 
 ---
 
@@ -256,8 +258,9 @@ Two fixes made it work, both learned the hard way:
   casually restarted — `daemon-reload` alone applies file edits.)
 
 **Still pending for remote operation:** boot still needs the LUKS passphrase
-at the physical console (dropbear-initramfs not yet installed), so a *remote*
-reboot is not yet safe even though the cycle itself is clean.
+at the console OR remotely via dropbear-initramfs over the LAN (see §2), so a
+LAN-scope remote reboot is now safe. NOTE: clean reboots are proven; unclean
+(power-loss) shutdowns have a known boot-recovery gap — see JOURNAL 2026-07-13.
 
 ---
 
@@ -478,6 +481,9 @@ FS at the service path. Start the stack. Verify instanceid.
 | Emergency-shell recovery procedure | ✅ rehearsed twice |
 | CephFS least-privilege mount unit | ✅ |
 | Docker-gated-on-mount guardrail | ✅ prevented real data loss |
+| Docker stack auto-start after reboot (web3home-stacks) | ✅ battle-tested |
+| Remote LUKS unlock (dropbear, LAN scope) | ✅ proven |
+| Unclean-shutdown boot recovery | ⚠️ known gap — fix designed, not implemented |
 | restic backup with restore verification | ✅ |
 | Nextcloud / Ghost / LLM stack | ✅ serving |
 | Cloudflare + Traefik publishing pattern | ✅ |

@@ -1,0 +1,4 @@
+# NEVER commit real unlock credentials
+authorized_keys
+*_host_key
+*_host_key.pub

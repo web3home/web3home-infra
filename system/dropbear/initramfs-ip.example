@@ -1,0 +1,11 @@
+# Appended to /etc/initramfs-tools/initramfs.conf for early-boot networking.
+# Without an IP= line, dropbear does not start.
+# Format: client:server:gateway:netmask:hostname:device:autoconf
+# Static is preferred over DHCP for outage recovery (router may not be serving
+# leases yet when the box boots after a shared power loss).
+# Replace with real LAN values; device name must match early-boot naming
+# (predictable names like enp197s0 apply unless net.ifnames=0 is set).
+IP=192.0.2.10::192.0.2.1:255.255.255.0:HOSTNAME:enp197s0:off
+
+# Also add the NIC driver defensively to /etc/initramfs-tools/modules:
+#   r8169
