@@ -1,0 +1,17 @@
+[Unit]
+Description=Bring up web3home Docker Compose stacks (post CephFS + Docker)
+Documentation=https://github.com/web3home/web3home-infra
+Requires=docker.service
+After=docker.service
+RequiresMountsFor=/srv/dm/ceph
+PartOf=docker.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+User=dm
+Group=docker
+ExecStart=/opt/web3home/bin/compose-boot-up.sh
+
+[Install]
+WantedBy=multi-user.target
