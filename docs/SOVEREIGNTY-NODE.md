@@ -205,7 +205,53 @@ passes too early and the mount dies with `no mds is up`.
 `wait-for-ceph-mon.service` polls `microceph.ceph mds stat` for `up:active`
 (up to 180 s, covering MDS journal replay after an unclean boot); a drop-in
 makes the mount `After=`/`Wants=` it. With this, the mount succeeds on the
-first attempt at boot and Docker auto-starts behind it.
+first attempt after a **clean** boot and Docker auto-starts behind it.
+
+**The gate is an optimisation, not a guarantee** — after an unclean shutdown it
+can pass and the mount still fail. See the next section.
+
+### Unclean-shutdown recovery: mount retry (✅ failure-injection tested)
+
+Clean reboots are covered by the gate above. **Power loss is a different animal.**
+The MDS can report `up:active` while the filesystem is still not serviceable (OSD
+coming up, PGs peering), so the mount fires anyway and dies with
+`no mds (Metadata Server) is up`. Then:
+
+- `srv-ceph.mount` fails **once**. systemd has no native mount retry (upstream
+  RFE #4468, never implemented). `automount` is not the answer either — it stays
+  failed indefinitely after a failed attempt (#16811).
+- `docker.service` and dependent units die as **dependency** failures →
+  `inactive (dead)`, not `failed`. Nothing retries them, and an `OnFailure=` on
+  them could never fire.
+
+Real incident: services down **8 hours**, and recovery was accidental — the
+nightly restic timer's `RequiresMountsFor=/srv/ceph` re-triggered the mount long
+after Ceph had stabilised.
+
+**Do not try to make the gate smarter.** No status string reliably predicts
+mountability. Gating on `ceph -s` health is actively harmful on a single-OSD
+node: HEALTH_OK there is artificial (it depends on muted `POOL_NO_REDUNDANCY` /
+`POOL_HAS_NO_REPLICAS_CONFIGURED` warnings) and reverts to WARN when the mutes
+lapse — the gate would then time out on every boot. Stability polling only
+catches an MDS *flap*, not an MDS that is genuinely active while the OSDs aren't
+ready.
+
+**Retry is the guarantee.** Hang `OnFailure=` off the **mount** (which fails
+properly), never off the dependency-failed units:
+
+```ini
+# /etc/systemd/system/srv-ceph.mount.d/20-retry-on-failure.conf
+[Unit]
+OnFailure=cephfs-mount-retry.service
+```
+
+That oneshot runs a helper which retries the mount for ~20 min and, **on success,
+explicitly starts the dependent units** — deliberate recovery instead of an
+accidental side effect. It exits immediately if a shutdown is in progress (same
+lesson as the shutdown guard).
+
+Test it without pulling power: `snap stop microceph.mds` reproduces the exact
+`no mds is up` error while mon and OSD stay up. See `system/ceph/`.
 
 ### Never let Docker start before CephFS (✅ — prevented a real disaster)
 Drop-in `/etc/systemd/system/docker.service.d/10-wait-cephfs.conf`:
