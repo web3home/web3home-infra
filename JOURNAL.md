@@ -1,3 +1,64 @@
+## 2026-07-15 (later) — Odroid decommission arc begins: Vaultwarden migrated
+
+**Result:** Vaultwarden moved Odroid → bee001, first of the P5 service migrations.
+Old container left **stopped, not deleted** on the Odroid as rollback.
+
+### Odroid inventory — the handover undersold this
+
+P5 claimed 4 services. Reality: ~11 running, plus ~8 long-dead containers
+(bitcoin-node exited 11mo ago, n8n/nginx/nodered 10-11mo, odoo 4mo) and 3 already
+migrated (ghost, ollama×2). Real migration set is 3 stacks — vaultwarden,
+nostr-relay, mattermost(+mail2most) — plus DDNS×2 and Traefik. `nostr-json` and
+`bankless-redirect` become Traefik config, not containers. `portainer` +
+`docker-socket-proxy` to be retired (they're the old operating model; bee001 uses
+git-tracked compose + web3home-stacks). Home Assistant to be rebuilt fresh (one
+bulb — not worth migrating, and it lets us re-decide its exposure).
+
+### Findings
+
+- **Stale duplicate routes.** The old Odroid Nextcloud stack was still RUNNING with
+  `traefik.http.routers.nextcloud.rule=Host(nextcloud003.web3home.info)` — the same
+  host bee001 serves. Not split-brain in practice: the file route carries an explicit
+  `priority: 100`, beating the label route's length-derived default (~38). Deliberate,
+  by whoever wrote dynamic.yml. Still stopped it — one config edit could have flipped
+  it. Headscale has the same duplicate-route pattern.
+- **Ingress identified.** `cloudflare-ddns` containers ⇒ dynamic public IP +
+  port-forward, NOT a Cloudflare Tunnel. netcheck: 91.x public v4, no CGNAT,
+  MappingVariesByDestIP false. So P3 is mostly **repointing the router's 80/443
+  forward from .11 → .10**; dynamic.yml's targets already say 192.168.31.10.
+- **Vaultwarden was insecure.** No env vars at all ⇒ `SIGNUPS_ALLOWED` defaulted to
+  **true** on an internet-facing instance (anyone could register), and `DOMAIN` unset
+  (breaks WebAuthn/U2F + email links). Both fixed. ADMIN_TOKEN stays unset ⇒ /admin
+  disabled. Image was already current (`vaultwarden/server:latest`) — only the
+  container name `bitwardenrs` was a pre-2021 leftover.
+- **Odroid IS backed up** (restic → RPi4, cron 05:00, 20 snapshots) incl. Portainer's
+  data dir, so the `/data/compose/<N>` stack definitions survive. Compose files are
+  readable straight off disk at `appdata/portainer/compose/<N>` — no Portainer API.
+
+### Migration pattern (reusable for the rest)
+
+compose on bee001 (git-tracked, data on CephFS) → **stop source container** → tar
+`/data` → scp → start → verify on LAN port → add `priority: 100` file route in the
+Odroid's dynamic.yml → verify via HTTPS → `.boot-enabled` → leave source stopped.
+
+- **Stopping the source is mandatory for SQLite/DB stacks.** The tar caught
+  `db.sqlite3-wal` (506K, dated today) while the main DB was last written Jul 11 —
+  copying only `db.sqlite3` would have silently lost days of vault changes.
+- `rsa_key.pem` must come across or every client session is invalidated.
+- Web vault needs **HTTPS** to test: `crypto.subtle` is secure-context-only, so
+  `http://<lan-ip>:8484` loads the UI but can't log in. Not a migration fault.
+
+### Backup regression caught (would have been silent)
+
+`BACKUP_PATHS` didn't include `/srv/dm/ceph/vaultwarden` — the migration moved the
+password vault from a backed-up box to an unbacked-up path. Fixed by mirroring the
+existing MariaDB pattern rather than just appending a path: **SQLite in WAL mode has
+the same live-copy hazard as a running InnoDB dir** (db.sqlite3/-wal/-shm captured
+mid-checkpoint = unrestorable). Added a `sqlite3 .backup` (online backup API)
+pre-step writing a consistent snapshot to `/srv/dm/services/vaultwarden/`, and
+EXCLUDED the live `db.sqlite3*` + icon_cache. Verified: `Vaultwarden snapshot OK
+(956K)`, backup completed clean.
+
 ## 2026-07-15 — Unclean-shutdown recovery FIXED (retry chain); redis AOF papercut
 
 **Result:** the 8h-outage hole from 2026-07-10 is closed. A failed CephFS mount

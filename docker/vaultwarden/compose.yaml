@@ -1,0 +1,23 @@
+# Vaultwarden — migrated from Odroid M1 (ARM64) to bee001 (amd64)
+#
+# Storage: CephFS-backed (/srv/dm/ceph/vaultwarden/data), LUKS-encrypted OSD beneath.
+#   SQLite + attachments + the RSA keypair that signs sessions. The container MUST be
+#   stopped for a consistent copy — a live copy risks a torn DB.
+# TLS: terminated upstream by Traefik (file-provider route), as with Ghost/Nextcloud.
+# Naming: the Odroid container was `bitwardenrs` (pre-2021 project name). Same image,
+#   same data format — only the container name changes.
+# SECURITY: the Odroid deployment passed NO env vars, so SIGNUPS_ALLOWED defaulted to
+#   TRUE on an internet-facing instance, and DOMAIN was unset (breaking WebAuthn/U2F
+#   and email links). Both fixed here. ADMIN_TOKEN stays unset -> /admin disabled.
+services:
+  vaultwarden:
+    image: vaultwarden/server:latest
+    container_name: vaultwarden
+    restart: unless-stopped
+    volumes:
+      - /srv/dm/ceph/vaultwarden/data:/data
+    environment:
+      DOMAIN: "https://bitwarden003.web3home.info"
+      SIGNUPS_ALLOWED: "false"
+    ports:
+      - "${VW_BIND_IP:-127.0.0.1}:8484:80"
