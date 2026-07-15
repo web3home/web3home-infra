@@ -51,7 +51,7 @@ outage reproduced by the very code meant to prevent it. Narrow (only at the 20-m
 boundary), but the wrong failure mode to ship. Fixed: bring-up factored into a
 function + a post-loop `mountpoint` re-check.
 
-### KNOWN OPEN — redis AOF corruption (a Fix B side effect)
+### Redis AOF corruption (a Fix B side effect) — fixed same day
 
 After the clean reboot, `nextcloud-redis` crash-looped (`restarts=18`, exit 1):
 
@@ -67,11 +67,19 @@ Cleared by moving the AOF aside (`appendonlydir.corrupt-20260715`) and restartin
 The data is a **cache + file locks**, not durable state, so losing it costs nothing
 (`occ status` confirmed Nextcloud healthy throughout). Stable 13h since.
 
-**Permanent fix pending.** (1) drop persistence (`--save "" --appendonly no`) — it's
-a cache; persistence buys nothing and causes this; (2) `--aof-load-truncated yes` /
-`aof-load-corrupt-tail-max-size` so a corrupt tail is tolerated at startup;
-(3) graceful-stop redis only, in the shutdown guard (reintroduces slow-shutdown
-risk — least attractive). Leaning (1).
+**Fixed:** dropped persistence entirely —
+`command: ["redis-server", "--save", "", "--appendonly", "no"]` and removed the
+`/srv/dm/ceph/nextcloud/redis` volume. No AOF, no RDB, no data dir => nothing to
+corrupt, so the SIGKILL race is structurally impossible rather than merely rarer.
+Verified: `config get appendonly` = no, `config get save` = empty.
+
+Rejected: `--aof-load-truncated` / `aof-load-corrupt-tail-max-size` (tolerates the
+corruption instead of removing the cause), and graceful-stopping redis in the
+shutdown guard (reintroduces the slow-shutdown wedge from 2026-06-13).
+
+Tradeoff accepted: a redis restart now drops all file locks. Nextcloud re-acquires
+them, and clearing stale locks is usually a fix rather than a problem — a client
+mid-upload could hiccup. Cheaper than periodic crash-loops.
 
 ## 2026-07-13 — P1 dropbear DONE; power-outage post-mortem; NC 33; vision + image-gen
 

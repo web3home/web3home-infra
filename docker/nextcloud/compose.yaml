@@ -28,9 +28,14 @@ services:
     image: redis:latest
     container_name: nextcloud-redis
     restart: unless-stopped
-    command: redis-server --appendonly yes
-    volumes:
-      - /srv/dm/ceph/nextcloud/redis:/data
+    # Cache + file locks only — regenerable, so persistence is all cost and no
+    # benefit. cephfs-shutdown-guard SIGKILLs containers at shutdown (docker stop
+    # is what wedged reboots, 2026-06-13), racing redis mid-AOF-append -> corrupt
+    # tail -> crash-loop on next boot. No AOF, no RDB, no data dir => nothing to
+    # corrupt. See JOURNAL 2026-07-15.
+    # List form is deliberate: `--save ""` needs the empty arg preserved, and the
+    # string form would drop it.
+    command: ["redis-server", "--save", "", "--appendonly", "no"]
     networks:
       - nextcloud-internal
 
