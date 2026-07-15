@@ -1,3 +1,78 @@
+## 2026-07-15 — Unclean-shutdown recovery FIXED (retry chain); redis AOF papercut
+
+**Result:** the 8h-outage hole from 2026-07-10 is closed. A failed CephFS mount
+now self-heals: OnFailure → retry helper → mount → explicitly starts docker +
+web3home-stacks. Proven by failure injection (no power cut needed) and a clean
+reboot.
+
+### The fix
+
+- `srv-dm-ceph.mount` drop-in `20-retry-on-failure.conf`:
+  `OnFailure=cephfs-mount-retry.service`.
+- `cephfs-mount-retry.service` (oneshot) → `/opt/web3home/bin/cephfs-mount-retry.sh`:
+  retries the mount for ~20 min (40 × 30s), bails immediately if a shutdown is in
+  progress, and on success explicitly starts `docker.service` +
+  `web3home-stacks.service`.
+- Why explicit dependent-start: docker and web3home-stacks die as **dependency**
+  failures → `inactive (dead)`, not `failed`. Nothing retries them and their own
+  `OnFailure=` could never fire. Confirmed in the 07-10 journal.
+
+### Why retry, not a smarter gate
+
+Prediction rejected. Ceph's docs say "at least one MDS up AND the cluster active +
+healthy" — but gating on `ceph -s` health is unusable here: our HEALTH_OK is
+artificial (muted POOL_NO_REDUNDANCY / POOL_HAS_NO_REPLICAS_CONFIGURED on a
+single-OSD node) and flips to WARN when the mutes lapse → a health gate would time
+out every boot. Stability polling (`up:active` across N polls) only fixes an MDS
+*flap*; it does nothing if the MDS is genuinely active while the OSD/PGs aren't
+serviceable — the likelier cause of the 17s gap on 07-10. No status string
+reliably predicts mountability. **Retry is the guarantee; the gate is an
+optimisation.** Gate hardening dropped as optional polish once retry proved out.
+
+### Test — failure injection, not a power cut
+
+`snap stop microceph.mds` reproduces the exact `no mds (Metadata Server) is up`
+error while mon+OSD stay up: same code path, narrower and safer than pulling power.
+Stop docker + unmount → stop MDS → `systemctl start srv-dm-ceph.mount` fails →
+OnFailure fires (retry `activating`) → loops every 30s → `snap start
+microceph.mds` → **mounted on attempt 4 → docker started → web3home-stacks started
+→ all 12 containers back. Zero manual steps.** ~30s, where 07-10 took 8h.
+
+Also answered empirically: the feared OnFailure recursion (retry calls `systemctl
+start` on the mount; a failed start re-fires OnFailure) is a non-issue — systemd
+coalesces the job. One clean invocation in the journal.
+
+### Bug caught before commit
+
+First cut of the script had a real tail-case bug: if the **final** attempt's
+`systemctl start` succeeded, the loop ended and the script printed ERROR and exited
+1 **without starting docker/web3home-stacks** — mount up, services down: the 07-10
+outage reproduced by the very code meant to prevent it. Narrow (only at the 20-min
+boundary), but the wrong failure mode to ship. Fixed: bring-up factored into a
+function + a post-loop `mountpoint` re-check.
+
+### KNOWN OPEN — redis AOF corruption (a Fix B side effect)
+
+After the clean reboot, `nextcloud-redis` crash-looped (`restarts=18`, exit 1):
+
+    Bad file format reading the append only file
+    appendonlydir/appendonly.aof.20.incr.aof at offset 21163915
+
+Offset ~21.1MB in a ~21MB file = the last write, cut mid-flight. Cause:
+`cephfs-shutdown-guard` `docker kill`s everything at shutdown (SIGKILL), racing
+redis mid-AOF-append. `docker stop` is not an option — it's what wedged reboots in
+the first place (2026-06-13). It's a race: most reboots are fine, occasionally not.
+
+Cleared by moving the AOF aside (`appendonlydir.corrupt-20260715`) and restarting.
+The data is a **cache + file locks**, not durable state, so losing it costs nothing
+(`occ status` confirmed Nextcloud healthy throughout). Stable 13h since.
+
+**Permanent fix pending.** (1) drop persistence (`--save "" --appendonly no`) — it's
+a cache; persistence buys nothing and causes this; (2) `--aof-load-truncated yes` /
+`aof-load-corrupt-tail-max-size` so a corrupt tail is tolerated at startup;
+(3) graceful-stop redis only, in the shutdown guard (reintroduces slow-shutdown
+risk — least attractive). Leaning (1).
+
 ## 2026-07-13 — P1 dropbear DONE; power-outage post-mortem; NC 33; vision + image-gen
 
 **Result:** remote LUKS unlock over SSH proven working (LAN scope). The

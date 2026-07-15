@@ -483,7 +483,7 @@ FS at the service path. Start the stack. Verify instanceid.
 | Docker-gated-on-mount guardrail | ✅ prevented real data loss |
 | Docker stack auto-start after reboot (web3home-stacks) | ✅ battle-tested |
 | Remote LUKS unlock (dropbear, LAN scope) | ✅ proven |
-| Unclean-shutdown boot recovery | ⚠️ known gap — fix designed, not implemented |
+| Unclean-shutdown boot recovery (mount retry chain) | ✅ failure-injection tested |
 | restic backup with restore verification | ✅ |
 | Nextcloud / Ghost / LLM stack | ✅ serving |
 | Cloudflare + Traefik publishing pattern | ✅ |

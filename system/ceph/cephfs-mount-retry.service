@@ -1,0 +1,8 @@
+[Unit]
+Description=Retry CephFS mount after a transient failure, then start dependents
+Documentation=https://github.com/web3home/web3home-infra
+
+[Service]
+Type=oneshot
+ExecStart=/opt/web3home/bin/cephfs-mount-retry.sh
+TimeoutStartSec=1500
