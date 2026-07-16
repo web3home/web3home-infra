@@ -22,14 +22,18 @@ HOST_TAG="bee001"
 NC_DB_CONTAINER="nextcloud-db"
 NC_DUMP_DIR="/srv/dm/services/nextcloud-db"
 NC_DUMP_FILE="${NC_DUMP_DIR}/nextcloud.sql"
-VW_DATA_DIR="/srv/dm/ceph/vaultwarden/data"
-VW_DUMP_DIR="/srv/dm/services/vaultwarden"
-VW_DUMP_FILE="${VW_DUMP_DIR}/vaultwarden.sqlite3"
+# SQLite-backed services: name|live DB|consistent snapshot destination.
+# Snapshots land under /srv/dm/services (already a backup path, on the root LV).
+SQLITE_DBS=(
+  "vaultwarden|/srv/dm/ceph/vaultwarden/data/db.sqlite3|/srv/dm/services/vaultwarden/vaultwarden.sqlite3"
+  "nostr-relay|/srv/dm/ceph/nostr-relay/db/nostr.db|/srv/dm/services/nostr-relay/nostr.db"
+)
 
 BACKUP_PATHS=(
   /srv/dm/services
   /srv/dm/ceph/nextcloud
   /srv/dm/ceph/vaultwarden
+  /srv/dm/ceph/nostr-relay
   /etc
   /opt/web3home
 )
@@ -64,12 +68,17 @@ else
   log "WARNING: '$NC_DB_CONTAINER' not running — NO fresh DB dump this run. Continuing with file backup."
 fi
 
-# Vaultwarden SQLite: same hazard as the live InnoDB dir — a file-level copy of a
-# WAL-mode DB can capture db.sqlite3/-wal/-shm mid-checkpoint and be unrestorable.
-# Use SQLite's online backup API for a consistent snapshot; the live DB is EXCLUDED.
-if [ -f "${VW_DATA_DIR}/db.sqlite3" ]; then
-  log "Snapshotting Vaultwarden SQLite (online backup API)..."
-  mkdir -p "$VW_DUMP_DIR"; chmod 700 "$VW_DUMP_DIR"
+# SQLite services: same hazard as the live InnoDB dir — a file-level copy of a
+# WAL-mode DB can capture the db/-wal/-shm trio mid-checkpoint and be unrestorable.
+# Use SQLite's online backup API for a consistent snapshot; live DBs are EXCLUDED.
+snapshot_sqlite() {
+  local name="$1" src="$2" dst="$3"
+  if [ ! -f "$src" ]; then
+    log "WARNING: no $name DB at $src — skipping snapshot."
+    return 0
+  fi
+  log "Snapshotting $name SQLite (online backup API)..."
+  mkdir -p "$(dirname "$dst")"; chmod 700 "$(dirname "$dst")"
   if python3 -c '
 import sqlite3, sys
 src = sqlite3.connect(sys.argv[1])
@@ -77,16 +86,19 @@ dst = sqlite3.connect(sys.argv[2])
 with dst:
     src.backup(dst)
 dst.close(); src.close()
-' "${VW_DATA_DIR}/db.sqlite3" "${VW_DUMP_FILE}.tmp" 2>>"$LOGFILE"; then
-    mv -f "${VW_DUMP_FILE}.tmp" "$VW_DUMP_FILE"; chmod 600 "$VW_DUMP_FILE"
-    log "Vaultwarden snapshot OK ($(du -h "$VW_DUMP_FILE" | cut -f1))."
+' "$src" "${dst}.tmp" 2>>"$LOGFILE"; then
+    mv -f "${dst}.tmp" "$dst"; chmod 600 "$dst"
+    log "$name snapshot OK ($(du -h "$dst" | cut -f1))."
   else
-    log "ERROR: Vaultwarden SQLite snapshot failed."
-    rm -f "${VW_DUMP_FILE}.tmp"; exit 1
+    log "ERROR: $name SQLite snapshot failed."
+    rm -f "${dst}.tmp"; return 1
   fi
-else
-  log "WARNING: no Vaultwarden DB at ${VW_DATA_DIR}/db.sqlite3 — skipping snapshot."
-fi
+}
+
+for entry in "${SQLITE_DBS[@]}"; do
+  IFS='|' read -r _n _s _d <<< "$entry"
+  snapshot_sqlite "$_n" "$_s" "$_d" || exit 1
+done
 
 restic unlock 2>&1 | tee -a "$LOGFILE" || log "Note: unlock returned non-zero (ok if no locks)"
 
@@ -100,6 +112,7 @@ if restic backup "${BACKUP_PATHS[@]}" \
     --exclude='/srv/dm/ceph/nextcloud/redis' \
     --exclude='/srv/dm/ceph/nextcloud/data/appdata_*/preview' \
     --exclude='/srv/dm/ceph/vaultwarden/data/db.sqlite3*' \
+    --exclude='/srv/dm/ceph/nostr-relay/db/nostr.db*' \
     --exclude='/srv/dm/ceph/vaultwarden/data/icon_cache' \
     --exclude='/srv/dm/ceph/llm/models' \
     --verbose 2>&1 | tee -a "$LOGFILE"; then

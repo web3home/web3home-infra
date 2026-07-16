@@ -1,3 +1,69 @@
+## 2026-07-16 — nostr-relay migrated; restic SQLite snapshots generalised
+
+**Result:** second P5 migration done. Odroid container left **stopped, not deleted**
+as rollback.
+
+### The blocker the earlier migrations dodged
+
+`image=nostr-rs-relay:arm64` — a **locally-built ARM64 image** existing nowhere but
+the Odroid's docker storage: unpullable, and wrong arch for amd64 bee001. Same trap
+as Nextcloud's custom `-pdlib` build; same fix: use the published upstream image.
+`scsibug/nostr-rs-relay:latest` is amd64 and built 2026-05-22 — actively published,
+no source build needed. Researched alternatives (strfry leads on throughput) and
+rejected switching: strfry is LMDB not SQLite, so 1.2 GB would need export/import,
+and its community Docker images are 1-2 years stale. Data moves byte-for-byte on
+nostr-rs-relay; changing relay implementation is a separate project.
+
+Image details that mattered: runs as `appuser` **uid 1000 = dm's uid**, so bind
+mounts work with no `user:` override; `APP_DATA=/usr/src/app/db` is already the
+image default; image ships no config.toml, so our read-only mount shadows nothing.
+
+### The 1.2 GB mystery — relay ran OPEN before the whitelist
+
+Config says `mode = "whitelist"` with ONE pubkey, `name = "Personal Nostr Relay"`.
+Reality: **456,727 events from 82,260 distinct authors**, dating 2021-12 → 2026-06.
+Only **23 events (0.005%) were ours**. Kind 7 (reactions) alone: 252,188. Also kind
+5 (deletions) 58k, kind 9735 (zaps) 44k — mostly strangers' social exhaust.
+
+A whitelist gates **writes, not reads**, and never evicts what's already stored, so
+the firehose it ingested pre-whitelist just sat there. `[retention] max_events =
+50000` was clearly never enforced either (456k present). Only 0.06 GB was freelist,
+so it wasn't dead pages — it was real data.
+
+Pruned to author-only + VACUUM: **1.23 GB → 252 KB** (events 456727→23, tags
+1138615→236). Nostr events are replicated across relays by design, and the full
+original remains in the Odroid's restic snapshots.
+
+**Trap:** the schema declares `ON DELETE CASCADE`, but `pragma foreign_keys`
+defaults to **0** (off, per-connection) in SQLite. Without `pragma foreign_keys =
+ON` the delete would have left 1.1M orphaned tag rows and reclaimed nothing.
+Pruned the **copy** on bee001, not the source — a botched prune costs a re-copy.
+
+### restic: generalised to a loop
+
+Two SQLite services now, so the Vaultwarden block became `SQLITE_DBS` (a
+`name|src|dst` table) + a `snapshot_sqlite()` function. Adding a third service is
+one line. A missing DB warns and continues; a failed snapshot is fatal (`|| exit 1`)
+— same fail-loud stance as the MariaDB dump's completion-marker check. Verified both
+snapshots + clean completion.
+
+### Incidental finding — headscale's label routers have ALWAYS been dead
+
+Traefik logs (predating our changes): `Router headscale cannot be linked
+automatically with multiple Services: ["headscale-grpc" "headscale"]`. Its labels
+declare two services (8080, 50443) and two routers without telling either router
+which service to use, so Traefik can't auto-link and **both label routers fail**.
+`ts.web3home.info` works purely off the file route (`priority: 100` → headscale:8080)
+— meaning the gRPC endpoint was never reachable. Not fixing: headscale is deferred
+and gets rebuilt fresh; this dies with the Odroid.
+
+### Note
+
+`max_event_bytes = 104857600` (100 MB/event, ~800× typical) left as-is:
+`max_message_length = 16384` caps inbound websocket messages at 16 KB, so an
+oversized event can't physically arrive, and whitelist mode means only we could try.
+Ugly, not dangerous — not worth a restart.
+
 ## 2026-07-15 (later) — Odroid decommission arc begins: Vaultwarden migrated
 
 **Result:** Vaultwarden moved Odroid → bee001, first of the P5 service migrations.

@@ -1,0 +1,28 @@
+# nostr-rs-relay — migrated from Odroid M1 (ARM64) to bee001 (amd64)
+#
+# Image: official scsibug/nostr-rs-relay:latest (amd64, confirmed via manifest).
+#   The Odroid ran a LOCALLY-BUILT `nostr-rs-relay:arm64` that existed nowhere but
+#   that box — unpullable, and wrong arch for bee001. Same trap as Nextcloud's
+#   custom -pdlib build; same fix: use the published upstream image.
+# Storage: CephFS-backed (/srv/dm/ceph/nostr-relay). SQLite in WAL mode — the
+#   container MUST be stopped for a consistent copy (see restic snapshot pre-step).
+# PRUNED at migration (2026-07-15): the DB held 456,727 events from 82,260 authors
+#   — the relay ran OPEN before the whitelist was added, and a whitelist only gates
+#   writes, it never evicts. Kind 7 (reactions) alone was 252k. Just 23 events were
+#   ours (0.005%). Pruned to author-only + VACUUM: 1.23 GB -> 252 KB. The full
+#   original remains in the Odroid's restic snapshots.
+#   NOTE: tag rows only cascade if `pragma foreign_keys = ON` — SQLite defaults it
+#   OFF per-connection despite the schema's ON DELETE CASCADE.
+# TLS: terminated upstream by Traefik (file-provider route), as with the others.
+services:
+  nostr-relay:
+    image: scsibug/nostr-rs-relay:latest
+    container_name: nostr-relay
+    restart: unless-stopped
+    volumes:
+      - /srv/dm/ceph/nostr-relay/config.toml:/usr/src/app/config.toml:ro
+      - /srv/dm/ceph/nostr-relay/db:/usr/src/app/db
+    environment:
+      RUST_LOG: "info,nostr_rs_relay=info"
+    ports:
+      - "${RELAY_BIND_IP:-127.0.0.1}:7777:7777"
