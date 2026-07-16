@@ -1,0 +1,91 @@
+# Mattermost — migrated from Odroid M1 (ARM64) to bee001 (amd64)
+#
+# Image: official mattermost/mattermost-team-edition:11.0.2 (amd64), pinned to the
+#   EXACT version the Odroid ran. Mattermost forbids skipping major versions, so
+#   migrate first, upgrade later — never both at once.
+#   The Odroid ran a locally-built `your-custom-mattermost:latest` (a literal
+#   tutorial placeholder name) wrapping a community ARM64 tarball. That build did
+#   nothing but repackage upstream for arm64, so on amd64 the official image is a
+#   genuine drop-in. NOTE: the Dockerfile left in appdata was STALE (hardcoded
+#   v10.10.1); the running binary reported 11.0.2 — Portainer held the real build.
+# DB: Postgres 16 as a proper stack member. The Odroid used a HOST-native Postgres
+#   16.11 reached at 172.17.0.1:5432 (the docker bridge gateway) — an implicit
+#   dependency with no container. Password ROTATED during migration.
+# config.json is copied VERBATIM and never edited: it holds AtRestEncryptKey and
+#   PublicLinkSalt, which decrypt stored fields. MM_* env vars override it, which
+#   is how the datasource is repointed without touching the file.
+# MFA is enforced; TOTP secrets live in the DB and ride along with the dump.
+services:
+  db:
+    image: postgres:16
+    container_name: mattermost-db
+    restart: unless-stopped
+    volumes:
+      - /srv/dm/ceph/mattermost/db:/var/lib/postgresql/data
+    environment:
+      POSTGRES_USER: "${DB_USER}"
+      POSTGRES_PASSWORD: "${DB_PASSWORD}"
+      POSTGRES_DB: "${DB_NAME}"
+    networks:
+      - mattermost-internal
+
+  app:
+    image: mattermost/mattermost-team-edition:11.0.2
+    container_name: mattermost-app
+    restart: unless-stopped
+    depends_on:
+      - db
+    security_opt:
+      - no-new-privileges:true
+    pids_limit: 200
+    tmpfs:
+      - /tmp
+    volumes:
+      - /srv/dm/ceph/mattermost/config:/mattermost/config:rw
+      - /srv/dm/ceph/mattermost/data:/mattermost/data:rw
+      - /srv/dm/ceph/mattermost/logs:/mattermost/logs:rw
+      - /srv/dm/ceph/mattermost/plugins:/mattermost/plugins:rw
+      - /srv/dm/ceph/mattermost/client-plugins:/mattermost/client/plugins:rw
+      - /srv/dm/ceph/mattermost/bleve-indexes:/mattermost/bleve-indexes:rw
+    environment:
+      MM_CONFIG: /mattermost/config/config.json
+      MM_SQLSETTINGS_DRIVERNAME: postgres
+      MM_SQLSETTINGS_DATASOURCE: "postgres://${DB_USER}:${DB_PASSWORD}@db:5432/${DB_NAME}?sslmode=disable&connect_timeout=10"
+      MM_SERVICESETTINGS_SITEURL: "https://connect.web3home.info"
+      MM_SERVICESETTINGS_LISTENADDRESS: ":8065"
+      MM_SERVICESETTINGS_ENABLELOCALMODE: "false"
+      MM_SERVICESETTINGS_ENABLEAPITEAMDELETION: "true"
+      MM_SERVICESETTINGS_ENABLEMULTIFACTORAUTHENTICATION: "true"
+      MM_SERVICESETTINGS_ENFORCEMULTIFACTORAUTHENTICATION: "true"
+      MM_TEAMSETTINGS_ENABLEOPENSERVER: "false"
+      MM_TEAMSETTINGS_ENABLEUSERDEACTIVATION: "true"
+      MM_TEAMSETTINGS_MAXUSERSPERTEAM: "7"
+      MM_FILESETTINGS_DRIVERNAME: local
+      MM_FILESETTINGS_MAXFILESIZE: "104857600"
+      MM_EMAILSETTINGS_ENABLESIGNINWITHEMAIL: "true"
+      MM_EMAILSETTINGS_ENABLESIGNUPWITHEMAIL: "true"
+      MM_EMAILSETTINGS_REQUIREEMAILVERIFICATION: "true"
+      MM_EMAILSETTINGS_SENDEMAILNOTIFICATIONS: "true"
+      MM_EMAILSETTINGS_ENABLESMTPAUTH: "true"
+      MM_EMAILSETTINGS_SMTPSERVER: smtp.migadu.com
+      MM_EMAILSETTINGS_SMTPPORT: "587"
+      MM_EMAILSETTINGS_CONNECTIONSECURITY: STARTTLS
+      MM_EMAILSETTINGS_SMTPUSERNAME: services@bankless.at
+      MM_EMAILSETTINGS_SMTPPASSWORD: "${SMTP_PASSWORD}"
+      MM_EMAILSETTINGS_FEEDBACKNAME: R2D2
+      MM_EMAILSETTINGS_FEEDBACKEMAIL: services@bankless.at
+      MM_EMAILSETTINGS_REPLYTOADDRESS: services@bankless.at
+      # Push metadata transits Mattermost Inc's TEST proxy. generic_no_channel
+      # means no message text or channel names leak. Self-host mattermost-push-proxy
+      # or drop push later — see JOURNAL.
+      MM_EMAILSETTINGS_SENDPUSHNOTIFICATIONS: "true"
+      MM_EMAILSETTINGS_PUSHNOTIFICATIONSERVER: https://push-test.mattermost.com
+      MM_EMAILSETTINGS_PUSHNOTIFICATIONCONTENTS: generic_no_channel
+    ports:
+      - "${MM_BIND_IP:-127.0.0.1}:8065:8065"
+    networks:
+      - mattermost-internal
+
+networks:
+  mattermost-internal:
+    driver: bridge

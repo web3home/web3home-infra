@@ -1,3 +1,74 @@
+## 2026-07-16 — Mattermost migrated (with real convos); restic covers Postgres
+
+**Result:** third P5 migration. 126 posts / 6 users / 18 channels / 1 team restored
+and verified by logging in. Odroid containers left **stopped, not deleted**.
+
+### Chose migrate over rebuild — and it was cheap
+
+It's a small test instance (17 MB DB, 6.3 MB uploads), so rebuild-fresh was tempting.
+But there were real conversations, and the version turned out favourable: the running
+binary reported **11.0.2**, and the official `mattermost/mattermost-team-edition:11.0.2`
+is amd64 — so a **same-version lift with NO schema migration**. Mattermost forbids
+skipping majors; migrate first, upgrade later, never both at once.
+
+### The stale-Dockerfile trap
+
+`/mnt/nvme/appdata/mattermost/mattermost-image/Dockerfile` hardcodes **v10.10.1**.
+The running binary said **11.0.2**. The file on disk is NOT what built the image —
+Portainer held the real definition. **Portainer is the source of truth; files lying
+around appdata are not.** Starting an 11.x image against a 10.x DB would have run a
+one-way migration. Always ask the binary: `/mattermost/bin/mattermost version`.
+
+The custom image (`your-custom-mattermost:latest` — a literal tutorial placeholder
+name) was Debian slim + the community ARM64 tarball + uid-2000 user + tini. **No
+patches**, so on amd64 the official image is a genuine drop-in, not an approximation.
+uid 2000 matches both sides — no chown needed.
+
+**Gained:** prepackaged plugins are arch-specific. Calls, Playbooks and Agents all
+installed cleanly from the official amd64 image; they likely never worked on the
+ARM64 repackage.
+
+### Architecture improved
+
+Postgres was **host-native 16.11 reached at 172.17.0.1:5432** (the docker bridge
+gateway) — an implicit dependency with no container, invisible in `docker ps`, which
+is why `mattermost-db` appeared to be missing. Now a proper `postgres:16` stack
+member on an internal network. **DB password rotated** during the move.
+
+`config.json` copied **verbatim, never edited** — it holds `AtRestEncryptKey` and
+`PublicLinkSalt` which decrypt stored fields. `MM_*` env vars override the file, so
+the datasource is repointed without touching it. MFA is enforced; TOTP secrets live
+in the DB and rode along with the dump (team keeps their authenticators).
+
+### pg_dump gotcha — the completion marker moved
+
+`pg_dump` >= **16.10** wraps plain-text dumps in `\restrict`/`\unrestrict` with a
+random key (CVE-2025-8714: a malicious source superuser could inject psql
+meta-commands and get shell on whoever restores). Backpatched through PG 13.
+Consequence: **`-- PostgreSQL database dump complete` is no longer the last line** —
+`\unrestrict <token>` is. A `tail -n 1 | grep` check (as the MariaDB block uses)
+would wrongly report a truncated dump. restic's Postgres check greps the file.
+
+Restore-side: `\restrict` is a **psql meta-command**, so the restoring psql must be
+>= 16.10 or it errors. Our `postgres:16` image ships 16.14. Fine, but pin-worthy.
+
+Also: `pg_dump` has no `--single-transaction` (that's a psql/pg_restore flag) — it's
+already consistent via an internal snapshot.
+
+### restic now covers 4 dump types
+
+MariaDB (nextcloud, 771M), Postgres (mattermost, 2.0M), SQLite × 2 (vaultwarden
+960K, nostr-relay 252K). `POSTGRES_DBS` / `SQLITE_DBS` tables + per-type functions;
+adding a service is one line. Live DB dirs all excluded.
+
+### Noted, not fixed — push metadata leaves the node
+
+`MM_EMAILSETTINGS_PUSHNOTIFICATIONSERVER=https://push-test.mattermost.com` — Mattermost
+Inc's **test** proxy: no uptime guarantee, and push metadata for private chat transits
+a third party. `PUSHNOTIFICATIONCONTENTS=generic_no_channel` means no message text or
+channel names leak, which is the right setting given the circumstance. Fix later:
+self-host `mattermost-push-proxy`, or drop push. Contradicts the node's premise.
+
 ## 2026-07-16 — nostr-relay migrated; restic SQLite snapshots generalised
 
 **Result:** second P5 migration done. Odroid container left **stopped, not deleted**

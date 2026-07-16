@@ -24,6 +24,11 @@ NC_DUMP_DIR="/srv/dm/services/nextcloud-db"
 NC_DUMP_FILE="${NC_DUMP_DIR}/nextcloud.sql"
 # SQLite-backed services: name|live DB|consistent snapshot destination.
 # Snapshots land under /srv/dm/services (already a backup path, on the root LV).
+# Postgres-backed services: name|container|user|db|dump destination.
+POSTGRES_DBS=(
+  "mattermost|mattermost-db|mattermost_user|mattermost|/srv/dm/services/mattermost-db/mattermost.sql"
+)
+
 SQLITE_DBS=(
   "vaultwarden|/srv/dm/ceph/vaultwarden/data/db.sqlite3|/srv/dm/services/vaultwarden/vaultwarden.sqlite3"
   "nostr-relay|/srv/dm/ceph/nostr-relay/db/nostr.db|/srv/dm/services/nostr-relay/nostr.db"
@@ -34,6 +39,7 @@ BACKUP_PATHS=(
   /srv/dm/ceph/nextcloud
   /srv/dm/ceph/vaultwarden
   /srv/dm/ceph/nostr-relay
+  /srv/dm/ceph/mattermost
   /etc
   /opt/web3home
 )
@@ -67,6 +73,38 @@ if docker ps --format '{{.Names}}' | grep -qx "$NC_DB_CONTAINER"; then
 else
   log "WARNING: '$NC_DB_CONTAINER' not running — NO fresh DB dump this run. Continuing with file backup."
 fi
+
+# Postgres services: a file-level copy of a live PGDATA is not reliably
+# restorable — same reasoning as the MariaDB dump. Dump logically; PGDATA excluded.
+# NOTE: pg_dump >= 16.10 wraps output in \restrict/\unrestrict (CVE-2025-8714), so
+# the completion marker is NO LONGER the last line — grep the file, don't tail it.
+dump_postgres() {
+  local name="$1" container="$2" user="$3" db="$4" dst="$5"
+  if ! docker ps --format '{{.Names}}' | grep -qx "$container"; then
+    log "WARNING: '$container' not running — NO fresh $name dump this run."
+    return 0
+  fi
+  log "Dumping $name Postgres from '$container'..."
+  mkdir -p "$(dirname "$dst")"; chmod 700 "$(dirname "$dst")"
+  if docker exec "$container" pg_dump --clean --if-exists --no-owner --no-acl \
+       -U "$user" "$db" > "${dst}.tmp" 2>>"$LOGFILE"; then
+    if grep -q -- '-- PostgreSQL database dump complete' "${dst}.tmp"; then
+      mv -f "${dst}.tmp" "$dst"; chmod 600 "$dst"
+      log "$name dump OK ($(du -h "$dst" | cut -f1))."
+    else
+      log "ERROR: $name dump missing completion marker — refusing truncated dump."
+      rm -f "${dst}.tmp"; return 1
+    fi
+  else
+    log "ERROR: pg_dump for $name failed."
+    rm -f "${dst}.tmp"; return 1
+  fi
+}
+
+for entry in "${POSTGRES_DBS[@]}"; do
+  IFS='|' read -r _n _c _u _d _f <<< "$entry"
+  dump_postgres "$_n" "$_c" "$_u" "$_d" "$_f" || exit 1
+done
 
 # SQLite services: same hazard as the live InnoDB dir — a file-level copy of a
 # WAL-mode DB can capture the db/-wal/-shm trio mid-checkpoint and be unrestorable.
@@ -113,6 +151,7 @@ if restic backup "${BACKUP_PATHS[@]}" \
     --exclude='/srv/dm/ceph/nextcloud/data/appdata_*/preview' \
     --exclude='/srv/dm/ceph/vaultwarden/data/db.sqlite3*' \
     --exclude='/srv/dm/ceph/nostr-relay/db/nostr.db*' \
+    --exclude='/srv/dm/ceph/mattermost/db' \
     --exclude='/srv/dm/ceph/vaultwarden/data/icon_cache' \
     --exclude='/srv/dm/ceph/llm/models' \
     --verbose 2>&1 | tee -a "$LOGFILE"; then
