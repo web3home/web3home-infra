@@ -86,6 +86,29 @@ services:
     networks:
       - mattermost-internal
 
+  mail2most:
+    # IMAP -> Mattermost bridge for hello@web3home.info -> #enterprise-solutions.
+    # Folded into this stack (not its own) because it's a satellite of mattermost:
+    # shares its lifecycle, and reaches it at app:8065 on the internal network
+    # instead of the old config's round trip out through Cloudflare and back.
+    # Odroid ran a locally-built `mail2most:arm64`; upstream (Virtomize) publishes
+    # amd64 as virtomize/mail2most:latest, rebuilt daily.
+    # data.json (dedup state) was UNMOUNTED on the Odroid — living in the container
+    # layer, so any recreate would have re-posted every mail. Now on CephFS.
+    # Config holds IMAP + Mattermost creds: CephFS, chmod 600, never in this repo.
+    image: virtomize/mail2most:latest
+    container_name: mail2most
+    restart: unless-stopped
+    depends_on:
+      - app
+    volumes:
+      - /srv/dm/ceph/mattermost/mail2most/mail2most.conf:/mail2most/conf/mail2most.conf:ro
+      - /srv/dm/ceph/mattermost/mail2most/data:/mail2most/data:rw
+    environment:
+      TZ: Europe/Berlin
+    networks:
+      - mattermost-internal
+
 networks:
   mattermost-internal:
     driver: bridge
