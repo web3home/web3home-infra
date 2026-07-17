@@ -1,0 +1,38 @@
+# Cloudflare DDNS — replaces two oznu/cloudflare-ddns containers on the Odroid.
+#
+# WHY REPLACED: oznu/docker-cloudflare-ddns was ARCHIVED by its owner in Aug 2022;
+#   the Docker Hub images are ~5 years old. It also determines the public IP over
+#   plain DNS, which is forgeable — an attacker who spoofs a response could point
+#   these domains anywhere. favonia is maintained and queries Cloudflare over HTTPS.
+#
+# WHY ONE CONTAINER: favonia takes a DOMAINS list spanning multiple zones with a
+#   single scoped token, so the two oznu containers (one per zone) collapse to one.
+#
+# BUG FIXED: the oznu containers set ZONE= with no SUBDOMAIN, so they only ever
+#   updated the zone APEX. connect/ts/relay are standalone A records and were
+#   therefore NEVER updated — on the next IP change, Mattermost and the nostr relay
+#   would have gone dark while Nextcloud/Vaultwarden (CNAMEs riding the apex) kept
+#   working. Silent and confusing. All five A records are now managed explicitly.
+#
+# Token: dedicated, scoped Zone:Read + DNS:Edit on web3home.info + bankless.at.
+#   favonia does NOT accept legacy global API keys.
+# Bridge network is sufficient: IPv4 detection is an HTTPS call out through NAT, so
+#   Cloudflare sees the host's public IP. host networking is only needed for IPv6.
+services:
+  cloudflare-ddns:
+    image: favonia/cloudflare-ddns:latest
+    container_name: cloudflare-ddns
+    restart: unless-stopped
+    user: "1000:1000"
+    read_only: true
+    cap_drop:
+      - all
+    security_opt:
+      - no-new-privileges:true
+    environment:
+      CLOUDFLARE_API_TOKEN: "${CF_DNS_API_TOKEN}"
+      DOMAINS: "web3home.info,connect.web3home.info,ts.web3home.info,bankless.at,relay.bankless.at"
+      PROXIED: "true"
+      IP4_PROVIDER: cloudflare.trace
+      IP6_PROVIDER: none
+      TZ: Europe/Berlin
