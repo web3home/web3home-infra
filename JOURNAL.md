@@ -1,3 +1,72 @@
+## 2026-07-17 — DDNS: oznu → favonia; home-IP leak closed
+
+**Result:** two archived DDNS containers replaced by one maintained container, a
+silent staleness bug fixed, and `relay.bankless.at` stopped publishing our home IP.
+
+### The leak
+
+Zone export showed `relay.bankless.at ... A 91.64.185.204 ; cf_tags=cf-proxied:false`
+— the ONLY grey-clouded A record across both zones. Our home IP was in public DNS:
+ISP, rough location, and a direct path bypassing Cloudflare entirely.
+
+Decided to proxy it (orange). Nostr events are public and signed, so Cloudflare
+seeing them reveals little and they cannot forge events. The tension is real —
+a censorship-resistant channel behind a CDN that could censor it — but the
+asymmetry decides it: **IP exposure is one-way** (scraped and archived by DNS
+history services; going orange stops further exposure but can't unpublish), while
+**Cloudflare dependency is reversible in one click**. Verified working through the
+orange cloud: NIP-11 returns our config, and a proper HTTP/1.1 upgrade handshake
+gets `101 Switching Protocols`. Cloudflare proxies WebSockets on all plans; our own
+Mattermost (`connect`, proxied) already proved it.
+
+### The silent bug: 3 of 5 A records were never updated
+
+oznu was configured `ZONE=` with no `SUBDOMAIN`, so it only ever updated the zone
+**apex**. `bitwarden003`/`llm`/`nextcloud003`/`www` are CNAMEs to the apex, so they
+followed. But `connect` (Mattermost), `ts` (headscale) and `relay` are **standalone
+A records** — nothing updated them. On the next dynamic-IP change, Mattermost and
+the relay would have gone dark while Nextcloud and Vaultwarden kept working. Latent
+for months; only visible because the IP hadn't moved.
+
+### Why oznu had to go
+
+`oznu/docker-cloudflare-ddns` was **archived by its owner Aug 2022**; Docker Hub
+images ~5 years old. Worse, it determines the public IP over **plain DNS**, which is
+forgeable — spoof a response and it points our domains anywhere. On a node whose
+premise is removing untrusted dependencies, a spoofable DNS updater is foundational.
+favonia is maintained and queries Cloudflare over HTTPS (`IP4_PROVIDER=cloudflare.trace`).
+
+### Config notes
+
+One container replaces two: favonia takes a DOMAINS list spanning zones with a
+single token. `IP6_PROVIDER=none` (netcheck: no IPv6). Dedicated scoped token
+(Zone:Read + DNS:Edit on both zones) — favonia does NOT accept legacy global keys.
+No Client-IP filter on the token: our IP is dynamic, so pinning would break the
+updater exactly when it's needed.
+
+**Cache gotcha:** favonia caches Cloudflare record state for **6h**. Editing a record
+in the dashboard to test does NOT get corrected within 5m — the cached view still
+looks current. A restart flushes it. The IP-detection path (the actual job) is not
+cached and runs every 5m. Worth knowing: an out-of-band record edit can take up to
+6h to be corrected.
+
+**Write path must be tested explicitly.** All records read "already up to date", which
+exercises Zone:Read only — a read-only token would produce identical logs and fail
+silently at the next IP change. Broke `ts.web3home.info` to 192.0.2.1 (TEST-NET-1,
+headscale is dead) and confirmed `📡 Updated an outdated A record`.
+
+### Cloudflare housekeeping
+
+Deleted: `traefik.web3home.info` A (dashboard commented out in compose — orphaned),
+`odoo.web3home.info` CNAME (odoo exited 4 months ago), `_acme-challenge.bankless.at`
+TXT (stale DNS-01 leftover from an interrupted cert run). SSL/TLS mode confirmed
+**Full (strict)**.
+
+**Noted:** with the orange cloud, `dynamic.yml`'s TLS options (`modern: VersionTLS13`,
+`sniStrict`) only govern the **Cloudflare → origin** leg. What browsers negotiate is
+set by Cloudflare's Edge Certificates settings. The strict config is not reaching end
+users the way the file implies.
+
 ## 2026-07-16 — Mattermost migrated (with real convos); restic covers Postgres
 
 **Result:** third P5 migration. 126 posts / 6 users / 18 channels / 1 team restored
