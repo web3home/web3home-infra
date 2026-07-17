@@ -1,3 +1,184 @@
+## 2026-07-17 — Traefik moved to bee001: the Odroid is out of the serving path
+
+**Result:** the edge is on bee001. All seven routes serve from it, verified with the
+Odroid's Traefik **stopped**. Then every container on the Odroid was stopped and the
+external sweep still passed. Nothing on that box is load-bearing anymore.
+
+### The test approach that made this safe
+
+Certs were the enabler: earliest expiry Sep 19, i.e. **64 days out**, and Traefik
+renews at 30 days — so nothing would touch ACME before ~Aug 20 and **both Traefiks
+could run in parallel with no renewal race**. That meant no test ports: bee001's
+Traefik bound 80/443 and simply received nothing, because the router still forwarded
+to .11. Tested it directly with `curl --resolve <host>:443:192.168.31.10`, which
+bypasses DNS and Cloudflare entirely. The flip then became **only** the router
+change — nothing to reconfigure afterwards, and rollback was one router edit.
+
+### acme: copied, not re-issued
+
+12 certs, all valid into Sep/Oct. Copying moves private keys between machines;
+re-issuing is cleaner but burns Let's Encrypt rate limits if we iterate. Copied,
+because DNS-01 means bee001 can re-issue at any time — the low-risk path with a free
+fallback. Store holds 4 ghost certs (odoo, traefik, ha, jellyfin) with no routers;
+harmless, they age out. `jellyfin.web3home.info` was never in any inventory.
+
+**`ha.web3home.info` had a cert but NO DNS record** — DNS-01 doesn't need the name to
+resolve, so Traefik issued a cert for a hostname pointing nowhere. Home Assistant was
+never internet-reachable. Corrects an earlier assumption that it was exposed.
+
+### Dropped docker.sock
+
+The Odroid's Traefik mounted `/var/run/docker.sock` for the docker provider.
+docker.sock is root-equivalent on the host. Every route already lived in
+`dynamic.yml`, so the provider bought nothing — file-provider-only on bee001. Less
+attack surface, routes stay git-trackable. `nostr-json` was the only label-based
+service; converted to a file route.
+
+### Debugging the 521s — what actually worked
+
+After the flip: 521 (Cloudflare "origin unreachable") on everything.
+
+- **ufw was a RED HERRING.** It was active allowing only 22/tcp, which looked
+  damning — but **Docker publishes ports around ufw** (it writes iptables rules
+  ahead of ufw's chain). Adding 80/443 changed nothing. Called "found it" too fast.
+- **tcpdump settled it in one shot:** `tcp[tcpflags] & tcp-syn != 0 and not src host
+  192.168.31.10` showed **zero inbound SYNs** during an external curl. Packets never
+  arrived ⇒ router-side, ruling out everything host-side at once.
+- **Root cause: the router would not re-bind an EDITED forward rule.** The rules
+  displayed `443 → 192.168.31.10` correctly but did not take effect. Fix: **delete
+  both rules, recreate from scratch, reboot the router.**
+
+### Verification traps hit along the way
+
+- **Both Traefiks proxy to the same backends, so 200s prove nothing about which one
+  is serving.** Needed a distinguishing signal — bee001's CORS header on nostr.json.
+  Deliberately introduced an observable difference; only that made the test valid.
+- The CORS test reports "not bee001" on ANY failure, including a 521 error page.
+  Useless while the origin was down.
+- The definitive proof: **stop the Odroid's Traefik and see if everything still
+  works.** Did it once prematurely (before the flip) → instant 521s, which at least
+  proved the rollback path: stop → 521, start → restored in ~10s.
+- **WebSocket upgrade tests: botched three times.** `curl -I` sends HEAD; upgrades
+  need GET. And `Connection: Upgrade`/`Upgrade: websocket` are **HTTP/1.1**
+  mechanisms — meaningless over HTTP/2 (RFC 8441 uses Extended CONNECT), so
+  Cloudflare's HTTP/2 silently ignored them and returned a plain 200. Correct form:
+  `curl -s -o /dev/null -D - --http1.1 -H ... ` → `101 Switching Protocols`.
+
+### The 504: same-bridge hairpin
+
+`nostr-json` returned 504 while answering a direct curl fine. Cause: it shares
+Traefik's compose network, and the route pointed at the **host LAN IP** — so the
+packet left the bridge, hit the host, and was proxied back into the same bridge. The
+return path doesn't survive that. Services on *other* bridges (ghost, nextcloud…)
+reach the host IP fine. **Rule: anything on Traefik's own network must be addressed
+by container name.** Fixed by `http://nostr-json:80` and dropping the published port
+entirely.
+
+### NIP-05 CORS gap closed
+
+`bankless.at/.well-known/nostr.json` returned 200 with **no
+`access-control-allow-origin`** — plain nginx sends none. Browser nostr clients fetch
+it cross-origin, so verification would fail there; native clients (Damus, Amethyst)
+don't enforce CORS, which is why the checkmark looked fine. Added a `nostr-cors`
+headers middleware in Traefik — no nginx config needed. Now returns `*`.
+
+### spleeter-web was squatting on 443
+
+Five containers bound `0.0.0.0:443` — every interface — for a local vocal-separation
+tool. Had we flipped the port-forward without checking, **the router would have sent
+the internet to spleeter's nginx.** Also: it lives at `/home/dm/code/apps/spleeter-web`,
+**outside the repo**, so `compose-boot-up.sh` never saw it and it only came back via
+`unless-stopped`. Stopped via `compose down` (volumes kept, 56M). **Its 443 mapping
+must go before it's ever started again** — it's reached on :8200 anyway.
+
+### bankless.at is now a game
+
+The apex was served by `bankless-redirect` (a `traefik/whoami` dummy backend existing
+only to hang a redirectregex on — Traefik needs no service for a redirect). It exited
+255 four days ago and nobody noticed. Replaced with a small greyscale canvas game
+(honey badger carrying a coin, jumping banks) served by the same nginx.
+`priority: 50` so the NIP-05 route still wins.
+
+### Home Assistant — rebuilt fresh, LAN only
+
+One bulb didn't justify migrating. **No Traefik route, no DNS record, no
+port-forward.** `network_mode: host` is required, not laziness: WiZ bulbs are found
+by UDP broadcast on :38899, which a bridge network can't see. Useful side effect —
+**host networking means ufw actually governs the port** (unlike docker-published
+ports), so LAN-only is real rather than aspirational. Bluetooth errors in the log are
+cosmetic: HA auto-discovered bee001's BT adapter but BlueZ needs D-Bus, which isn't
+mounted. Bulb is WiFi; skip the Bluetooth integration.
+
+### Headscale findings — deferred, and the config confirms the research
+**Embedded DERP was OFF and it used Tailscale's public relays** — so the ~5-15% of
+traffic where NAT traversal fails was relayed through Tailscale's infrastructure. The
+exact default-config trap the earlier research flagged, on a node built to exit that
+kind of dependency.
+
+Also: `database.host: host.docker.internal` — **another host-native Postgres**, same
+hidden pattern as Mattermost. And `policy.mode: file` with `acl.hujson` — the legacy
+ACL model; upstream now says Grants.
+
+The control plane is plain HTTPS, which is why it worked through the orange cloud
+(the 2026-07-10 outage showed `fetch control key: 523` — a *Cloudflare* error).
+**Correction to an earlier claim:** "Cloudflare can't carry UDP so DERP can't
+traverse" was true but irrelevant to what existed — DERP was never enabled.
+
+So replicating what we had is easy; *improving* on it is the hard part. Enabling
+embedded DERP needs UDP 3478, which Cloudflare won't proxy ⇒ its own port-forward and
+likely a grey-clouded hostname, **re-exposing the IP we just masked**. That's a values
+call (plus native-vs-Docker, grants-vs-ACL) and gets its own session.
+
+### restic
+
+Added `/srv/dm/ceph/traefik` to BACKUP_PATHS — it holds acme.json (12 certs +
+private keys), dynamic.yml (**the entire route table**), the NIP-05 identity and the
+site. Would have been the same silent regression as the Vaultwarden one, on the config
+that makes the whole edge work.
+
+### Odroid: stopped, not wiped
+
+All containers stopped; external sweep still passes. Final restic run taken. **Not
+deleting piecemeal** — P4 re-images the box as Ceph node 2, which wipes it wholesale;
+careful individual deletion is busywork with real risk. Leaving the disk intact as a
+rollback.
+
+**Check before the wipe:** headscale's data (host-native Postgres — not in any
+container; node registrations + acl.hujson exist only there) and bitcoin-node's
+datadir (exited 11mo ago; if it ever synced mainnet, worth knowing the size).
+
+### Caught at commit: a real password hash in dynamic.yml
+
+Sanitising the route table for the public repo surfaced two blocks we had never
+read — we only ever viewed `head -60` of middlewares and the routers section, so the
+middle was a blind spot. A `default-auth` basicAuth middleware carrying a **real
+apr1/MD5 hash**, and an `admin-whitelist` with the real LAN range. **Both dead code**
+— no router referenced either. They were staged for the **Traefik dashboard, which
+was never enabled**, which also explains why `traefik.web3home.info` had a cert and a
+DNS record serving nothing. Deleted rather than placeholdered. The hash used `$$`
+(Docker Compose escaping), so it was pasted from a label context and would not even
+have matched in file-provider YAML. Rotate the password regardless if it exists
+anywhere else: apr1 is MD5 and cracks offline in seconds.
+
+The first sanitising pass replaced only `192.168.31.10` and missed
+`192.168.31.0/24` in the whitelist. **`grep -c` must return 0 before committing** —
+gitleaks hunts tokens and keys, not RFC1918 addresses, so it would NOT have caught
+this.
+
+A local model reviewing the file flagged the hash correctly — a genuine catch — but
+also claimed every `Host()` rule had mismatched parentheses, and asserted the IPs
+were clean when they were not. The syntax claim was disproven twice: Traefik loads
+the file and all seven routes serve 200/302 in production, and `grep -q '](http'`
+returned "file is clean", so the mangling was a paste-pipeline artifact (it autolinks
+`www.*`) — the model reviewed a corrupted copy. **Test against production; don't
+argue with a reviewer.**
+
+### Stale now
+
+ufw rules `2368/tcp` and `3000/tcp` ALLOW from 192.168.31.11 — they existed so the
+*Odroid's* Traefik could reach bee001's services. Dead weight.
+Traefik 3.7.8 is out; we pinned 3.6.1 to match the Odroid. Upgrade separately.
+
 ## 2026-07-17 — DDNS: oznu → favonia; home-IP leak closed
 
 **Result:** two archived DDNS containers replaced by one maintained container, a

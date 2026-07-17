@@ -1,0 +1,258 @@
+http:
+  middlewares:
+    nostr-cors:
+      headers:
+        accessControlAllowOriginList:
+          - "*"
+        accessControlAllowMethods:
+          - GET
+          - OPTIONS
+    # General hardened security headers (used for Ghost blog and public sites)
+    security-headers:
+      headers:
+        # Frame protection
+        frameDeny: true
+        customFrameOptionsValue: "SAMEORIGIN"
+
+        # CSP (balanced for Ghost/blogs)
+        contentSecurityPolicy: >
+          default-src 'self';
+          script-src 'self' 'unsafe-inline' https://cdnjs.cloudflare.com https://cdn.jsdelivr.net https://static.cloudflareinsights.com;
+          style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://cdnjs.cloudflare.com;
+          font-src 'self' https://fonts.gstatic.com https://cdnjs.cloudflare.com;
+          img-src 'self' data: blob: https:;
+          connect-src 'self' https: wss: ws:;
+          media-src 'self' data: blob:;
+          frame-src 'self';
+          object-src 'none';
+          base-uri 'self';
+          form-action 'self';
+          frame-ancestors 'self';
+          upgrade-insecure-requests;
+          block-all-mixed-content;
+
+        # HSTS (Strict Transport Security)
+        forceSTSHeader: true
+        stsSeconds: 31536000
+        stsIncludeSubdomains: true
+        stsPreload: true
+
+        # Other protections
+        contentTypeNosniff: true
+        browserXssFilter: true
+        referrerPolicy: "strict-origin-when-cross-origin"
+
+        # Modern permissions policy
+        permissionsPolicy: "geolocation=(), microphone=(), camera=()"
+
+        # Remove server info
+        customResponseHeaders:
+          X-Powered-By: ""
+          Server: ""
+
+        # Nextcloud requires slightly looser CSP (inline styles/scripts are heavily used)
+    nextcloud-headers:
+      headers:
+        frameDeny: false
+        customFrameOptionsValue: "SAMEORIGIN"
+        contentSecurityPolicy: >
+          default-src 'self';
+          script-src 'self' 'unsafe-inline' 'unsafe-eval';
+          style-src 'self' 'unsafe-inline';
+          font-src 'self' data:;
+          img-src 'self' data: blob: https:;
+          connect-src 'self' https: wss: ws:;
+          media-src 'self' data: blob:;
+          object-src 'none';
+          base-uri 'self';
+          form-action 'self';
+          frame-ancestors 'self';
+          upgrade-insecure-requests;
+        forceSTSHeader: true
+        stsSeconds: 31536000
+        stsIncludeSubdomains: true
+        stsPreload: true
+        contentTypeNosniff: true
+        browserXssFilter: true
+        referrerPolicy: "strict-origin-when-cross-origin"
+        permissionsPolicy: "geolocation=(), microphone=self, camera=self"
+        customResponseHeaders:
+          X-Powered-By: ""
+          Server: ""
+
+    # Nextcloud redirect middleware for WebDAV
+    nextcloud-redirectregex:
+      redirectRegex:
+        permanent: true
+        regex: "https://(.*)/.well-known/(card|cal)dav"
+        replacement: "https://${1}/remote.php/dav/"
+
+
+
+    # Nostr.json middleware (serve JSON manually)
+    nostr-json:
+      redirectRegex:
+        regex: "^/.well-known/nostr.json"
+        replacement: "https://bankless.at/.well-known/nostr.json"
+        permanent: true
+
+    # Rate limiting
+    rate-limit:
+      rateLimit:
+        burst: 100
+        period: 1m
+        average: 50
+
+    admin-rate-limit:
+      rateLimit:
+        burst: 20
+        period: 1m
+        average: 10
+
+    # NOTE: a `default-auth` basicAuth middleware and an `admin-whitelist`
+    # ipWhiteList lived here. Both were dead code — no router referenced either —
+    # and the basicAuth line carried a real apr1 (MD5) hash, trivially crackable
+    # offline and never fit for a public repo. They were staged for the Traefik
+    # dashboard, which was never enabled. Removed rather than placeholdered.
+    # If basic auth is ever needed: file-based htpasswd (`usersFile:`) kept out
+    # of git — never an inline hash.
+
+  routers:
+    bankless-site:
+      rule: "Host(`bankless.at`) || Host(`www.bankless.at`)"
+      service: nostr-json-bee001
+      entryPoints:
+        - websecure
+      tls:
+        certResolver: cloudflare
+        options: modern@file
+      middlewares:
+        - security-headers
+      priority: 50
+    nostr-json-bee001:
+      rule: "Host(`bankless.at`) && PathPrefix(`/.well-known/nostr.json`)"
+      service: nostr-json-bee001
+      entryPoints:
+        - websecure
+      tls:
+        certResolver: cloudflare
+        options: modern@file
+      middlewares:
+        - nostr-cors
+      priority: 100
+    mattermost-bee001:
+      rule: "Host(`connect.web3home.info`)"
+      service: mattermost-bee001
+      entryPoints:
+        - websecure
+      tls:
+        certResolver: cloudflare
+      priority: 100
+    nostr-relay-bee001:
+      rule: "Host(`relay.bankless.at`)"
+      service: nostr-relay-bee001
+      entryPoints:
+        - websecure
+      tls:
+        certResolver: cloudflare
+      priority: 100
+    vaultwarden-bee001:
+      rule: "Host(`bitwarden003.web3home.info`)"
+      service: vaultwarden-bee001
+      entryPoints:
+        - websecure
+      tls:
+        certResolver: cloudflare
+        options: secure@file
+      middlewares:
+        - security-headers
+        - rate-limit
+      priority: 100
+
+    ghost-bee001:
+      rule: "Host(`web3home.info`)"
+      service: ghost-bee001
+      entryPoints:
+        - websecure
+      tls:
+        certResolver: cloudflare
+        options: modern@file
+      middlewares:
+        - security-headers
+        - rate-limit
+      priority: 100
+
+    nextcloud-bee001:
+      rule: "Host(`nextcloud003.web3home.info`)"
+      service: nextcloud-bee001
+      entryPoints:
+        - websecure
+      tls:
+        certResolver: cloudflare
+        options: secure@file
+      middlewares:
+        - nextcloud-headers
+        - nextcloud-redirectregex
+        - rate-limit
+      priority: 100
+
+    llm-bee001:
+      rule: "Host(`llm.web3home.info`)"
+      service: llm-bee001
+      entryPoints:
+        - websecure
+      tls:
+        certResolver: cloudflare
+        options: secure@file
+      middlewares:
+        - security-headers
+        - rate-limit
+      priority: 100
+
+  services:
+    nostr-json-bee001:
+      loadBalancer:
+        servers:
+          - url: "http://nostr-json:80"
+    mattermost-bee001:
+      loadBalancer:
+        passHostHeader: true
+        servers:
+          - url: "http://192.0.2.10:8065"
+    nostr-relay-bee001:
+      loadBalancer:
+        servers:
+          - url: "http://192.0.2.10:7777"
+    vaultwarden-bee001:
+      loadBalancer:
+        passHostHeader: true
+        servers:
+          - url: "http://192.0.2.10:8484"
+
+    ghost-bee001:
+      loadBalancer:
+        servers:
+          - url: "http://192.0.2.10:2368"
+
+    nextcloud-bee001:
+      loadBalancer:
+        passHostHeader: true
+        servers:
+          - url: "http://192.0.2.10:8080"
+
+    llm-bee001:
+      loadBalancer:
+        passHostHeader: true
+        servers:
+          - url: "http://192.0.2.10:3000"
+
+
+tls:
+  options:
+    modern:
+      minVersion: "VersionTLS13"
+      sniStrict: true
+    secure:
+      minVersion: "VersionTLS12"
+      maxVersion: "VersionTLS13"
+      sniStrict: true

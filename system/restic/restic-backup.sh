@@ -40,6 +40,7 @@ BACKUP_PATHS=(
   /srv/dm/ceph/vaultwarden
   /srv/dm/ceph/nostr-relay
   /srv/dm/ceph/mattermost
+  /srv/dm/ceph/traefik
   /etc
   /opt/web3home
 )

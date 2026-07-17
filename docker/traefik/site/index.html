@@ -1,0 +1,159 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+<title>BANKLESS</title>
+<style>
+  *{margin:0;padding:0;box-sizing:border-box}
+  html,body{height:100%;background:#0d0d0d;color:#e8e8e8;
+    font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;overflow:hidden}
+  #wrap{display:flex;flex-direction:column;align-items:center;justify-content:center;
+    height:100%;gap:14px;padding:12px}
+  canvas{border:1px solid #262626;max-width:100%;touch-action:none;display:block}
+  .hint{font-size:11px;color:#585858;letter-spacing:.12em;text-align:center;line-height:1.7}
+  .hint a{color:#7a7a7a;text-decoration:none;border-bottom:1px solid #333}
+</style>
+</head>
+<body>
+<div id="wrap">
+  <canvas id="c" width="800" height="300"></canvas>
+  <div class="hint">SPACE / TAP TO JUMP &nbsp;·&nbsp; HOLD TO JUMP HIGHER<br>
+    <a href="https://web3home.info">web3home.info</a></div>
+</div>
+<script>
+(()=>{
+const cv=document.getElementById('c'),g=cv.getContext('2d');
+const W=cv.width,H=cv.height,GY=H-44;
+const rnd=(a,b)=>a+Math.random()*(b-a);
+let state='title',t=0,dist=0,spd=5,spawn=60,shake=0;
+let best=+(localStorage.getItem('bankless_best')||0);
+const P={x:96,y:GY,vy:0,w:40,h:34,ground:true,coyote:0};
+let obs=[],sky=[],puff=[];
+for(let i=0;i<30;i++)sky.push({x:i*46+rnd(-9,9),w:rnd(16,40),h:rnd(18,72)});
+
+function rr(x,y,w,h,r){g.beginPath();g.moveTo(x+r,y);g.arcTo(x+w,y,x+w,y+h,r);
+  g.arcTo(x+w,y+h,x,y+h,r);g.arcTo(x,y+h,x,y,r);g.arcTo(x,y,x+w,y,r);g.closePath();}
+
+function reset(){state='play';t=0;dist=0;spd=5;spawn=50;obs=[];puff=[];
+  P.y=GY;P.vy=0;P.ground=true;}
+function jump(){
+  if(state!=='play'){reset();return;}
+  if(P.ground||P.coyote>0){P.vy=-11.7;P.ground=false;P.coyote=0;
+    for(let i=0;i<5;i++)puff.push({x:P.x+10,y:GY,vx:rnd(-1.6,-.3),vy:rnd(-1,.2),l:16});}
+}
+function cut(){if(P.vy<-4.6)P.vy=-4.6;}
+addEventListener('keydown',e=>{if(e.code==='Space'||e.code==='ArrowUp'){e.preventDefault();jump();}});
+addEventListener('keyup',e=>{if(e.code==='Space'||e.code==='ArrowUp')cut();});
+cv.addEventListener('pointerdown',e=>{e.preventDefault();jump();});
+cv.addEventListener('pointerup',cut);
+
+function coin(cx,cy,r){
+  g.fillStyle='#f2f2f2';g.beginPath();g.arc(cx,cy,r,0,7);g.fill();
+  g.strokeStyle='#8f8f8f';g.lineWidth=1.4;g.beginPath();g.arc(cx,cy,r-2.6,0,7);g.stroke();
+  g.fillStyle='#2b2b2b';g.font='bold '+(r*1.1|0)+'px ui-monospace,monospace';
+  g.textAlign='center';g.textBaseline='middle';g.fillText('\u20BF',cx,cy+.5);
+}
+function badger(px,py){
+  const run=P.ground?Math.sin(t*.42):0.5, bob=P.ground?Math.sin(t*.42)*1.1:0;
+  const y=py-P.h+bob;
+  // legs
+  g.fillStyle='#333';
+  g.fillRect(px+8,py-8+bob,6,8+run*3); g.fillRect(px+26,py-8+bob,6,8-run*3);
+  // tail
+  g.fillStyle='#3d3d3d'; g.beginPath();
+  g.moveTo(px+3,y+21);g.lineTo(px-11,y+13);g.lineTo(px-9,y+24);g.closePath();g.fill();
+  // body
+  g.fillStyle='#3d3d3d'; rr(px,y+5,P.w,P.h-5,11); g.fill();
+  // pale mantle along the back
+  g.fillStyle='#ededed'; rr(px+5,y+8,P.w-11,8,4); g.fill();
+  // head
+  g.fillStyle='#3d3d3d'; g.beginPath();g.arc(px+P.w-4,y+19,11,0,7);g.fill();
+  g.fillStyle='#ededed'; g.fillRect(px+P.w-12,y+8,6,5);
+  g.fillStyle='#2b2b2b'; g.beginPath();g.arc(px+P.w+6,y+22,5.5,0,7);g.fill();
+  g.fillStyle='#f2f2f2'; g.fillRect(px+P.w-1,y+16,3,3);
+  // contact shadow under the coin
+  g.fillStyle='rgba(0,0,0,.4)';
+  g.beginPath(); g.ellipse(px+15,y+8,10,3,0,0,7); g.fill();
+  // the coin, riding on its back
+  coin(px+15,y+1,9);
+}
+function bank(o){
+  const x0=o.x,y0=GY-o.h,w=o.w,h=o.h;
+  g.fillStyle='#575757'; g.fillRect(x0-4,GY-5,w+8,5);
+  g.fillStyle='#414141'; g.fillRect(x0,y0+13,w,h-18);
+  g.fillStyle='#8d8d8d';
+  const n=Math.max(3,Math.round(w/15)),gp=w/n;
+  for(let i=0;i<n;i++)g.fillRect(x0+gp*i+3,y0+17,gp-6,h-22);
+  g.fillStyle='#9c9c9c'; g.beginPath();
+  g.moveTo(x0-5,y0+15);g.lineTo(x0+w/2,y0-3);g.lineTo(x0+w+5,y0+15);g.closePath();g.fill();
+  g.fillStyle='#242424'; g.font='bold 10px ui-monospace,monospace';
+  g.textAlign='center';g.textBaseline='alphabetic'; g.fillText('$',x0+w/2,y0+13);
+}
+function hit(o){
+  return P.x+6<o.x+o.w && P.x+P.w-6>o.x && P.y>GY-o.h;
+}
+function loop(){
+  t++;
+  g.fillStyle='#0d0d0d'; g.fillRect(0,0,W,H);
+  g.save(); if(shake>0){g.translate(rnd(-shake,shake),rnd(-shake,shake));shake*=.88;}
+  g.fillStyle='#181818';
+  for(const s of sky){ if(state==='play')s.x-=spd*.16;
+    if(s.x<-46)s.x+=30*46; g.fillRect(s.x,GY-s.h,s.w,s.h); }
+  g.strokeStyle='#2e2e2e';g.lineWidth=2;
+  g.beginPath();g.moveTo(0,GY+1);g.lineTo(W,GY+1);g.stroke();
+  g.strokeStyle='#1f1f1f';g.lineWidth=2;g.setLineDash([14,22]);
+  g.lineDashOffset=(state==='play'?-dist*.6:0)%36;
+  g.beginPath();g.moveTo(0,GY+14);g.lineTo(W,GY+14);g.stroke();g.setLineDash([]);
+
+  if(state==='play'){
+    dist+=spd/8; spd=Math.min(11.5,5+dist*.0016);
+    if(--spawn<=0){ const h=rnd(38,74);
+      obs.push({x:W+30,w:rnd(30,64),h:h});
+      spawn=Math.round(rnd(58,104)-spd*3.2); }
+    for(const o of obs) o.x-=spd;
+    obs=obs.filter(o=>o.x+o.w>-10);
+    P.vy+=.56; P.y+=P.vy;
+    if(P.y>=GY){P.y=GY;P.vy=0;if(!P.ground)shake=2;P.ground=true;P.coyote=6;}
+    else if(P.coyote>0)P.coyote--;
+    for(const o of obs) if(hit(o)){
+      state='over'; shake=9;
+      best=Math.max(best,dist|0); localStorage.setItem('bankless_best',best|0);
+    }
+  }
+  for(const o of obs) bank(o);
+  puff=puff.filter(p=>p.l-->0);
+  for(const p of puff){ p.x+=p.vx-(state==='play'?spd*.4:0); p.y+=p.vy;
+    g.fillStyle='rgba(140,140,140,'+(p.l/26)+')';
+    g.beginPath();g.arc(p.x,p.y,p.l*.16,0,7);g.fill(); }
+  badger(P.x,P.y);
+  g.restore();
+
+  g.textAlign='right';g.textBaseline='top';
+  g.fillStyle='#6e6e6e';g.font='12px ui-monospace,monospace';
+  g.fillText('SATS '+String(dist|0).padStart(5,'0'),W-14,14);
+  g.fillStyle='#3f3f3f';g.fillText('BEST '+String(best).padStart(5,'0'),W-14,32);
+
+  g.textAlign='center';
+  if(state==='title'){
+    g.fillStyle='#ededed';g.font='bold 40px ui-monospace,monospace';
+    g.fillText('BANKLESS',W/2,58);
+    g.fillStyle='#5e5e5e';g.font='12px ui-monospace,monospace';
+    g.fillText('KEEP YOUR COIN. AVOID THE BANKS.',W/2,104);
+    if(t%64<40){g.fillStyle='#9a9a9a';g.fillText('SPACE / TAP TO RUN',W/2,136);}
+  }
+  if(state==='over'){
+    g.fillStyle='rgba(13,13,13,.78)';g.fillRect(0,0,W,H);
+    g.fillStyle='#ededed';g.font='bold 38px ui-monospace,monospace';
+    g.fillText('REKT',W/2,74);
+    g.fillStyle='#6e6e6e';g.font='12px ui-monospace,monospace';
+    g.fillText('THE BANK GOT YOUR COIN AT '+(dist|0)+' SATS',W/2,120);
+    if(t%64<40){g.fillStyle='#9a9a9a';g.fillText('SPACE / TAP TO RUN AGAIN',W/2,150);}
+  }
+  requestAnimationFrame(loop);
+}
+loop();
+})();
+</script>
+</body>
+</html>

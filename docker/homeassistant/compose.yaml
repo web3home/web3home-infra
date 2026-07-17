@@ -1,0 +1,27 @@
+# Home Assistant — rebuilt FRESH on bee001, not migrated from the Odroid.
+#
+# WHY FRESH: the Odroid instance drove exactly one bulb. Migrating it would have
+#   meant hauling a config we'd immediately outgrow; rebuilding costs an hour and
+#   lets us re-decide exposure from scratch.
+#
+# EXPOSURE: LAN ONLY. No Traefik route, no DNS record, no port-forward.
+#   (The Odroid had a cert for ha.web3home.info but NO DNS record — DNS-01 doesn't
+#   need the name to resolve, so Traefik happily issued a cert for a hostname that
+#   pointed nowhere. It was never actually internet-reachable.)
+#   HA has a real CVE history and there's no mesh to hide behind yet — revisit when
+#   Headscale returns.
+#
+# network_mode: host is REQUIRED, not laziness: WiZ bulbs are discovered via UDP
+#   broadcast on :38899, which a bridge network cannot see. Host mode also means
+#   ufw governs the port for real — docker-published ports bypass ufw entirely.
+services:
+  homeassistant:
+    image: ghcr.io/home-assistant/home-assistant:stable
+    container_name: homeassistant
+    restart: unless-stopped
+    network_mode: host
+    volumes:
+      - /srv/dm/ceph/homeassistant/config:/config
+      - /etc/localtime:/etc/localtime:ro
+    environment:
+      TZ: Europe/Berlin
