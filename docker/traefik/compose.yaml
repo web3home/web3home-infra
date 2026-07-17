@@ -1,0 +1,65 @@
+# Traefik — edge reverse proxy, migrated from Odroid M1 to bee001.
+#
+# NO docker.sock. The Odroid's Traefik mounted /var/run/docker.sock to read
+#   container labels — docker.sock is root-equivalent on the host, so a Traefik
+#   compromise becomes a host compromise. Every route already lives in
+#   dynamic.yml via the file provider, so the docker provider buys us nothing.
+#   File-provider-only: less attack surface, and routes stay git-trackable.
+#
+# Dashboard disabled: it was already unreachable on the Odroid (router labels
+#   commented out) and traefik.web3home.info has been deleted from DNS.
+#
+# acme.json was COPIED from the Odroid rather than re-issued: 12 certs, all valid
+#   into Sep/Oct 2026, and DNS-01 means bee001 can re-issue at any time if the copy
+#   misbehaves — so copying is the low-risk path with a free fallback.
+#   MUST be chmod 600 or Traefik refuses to start (it holds cert private keys).
+#   Contains 4 ghost certs (odoo, traefik, ha, jellyfin) with no routers; harmless,
+#   they'll age out.
+#
+# Routes reach services via the host LAN IP (192.168.31.10:PORT), exactly as the
+#   Odroid's Traefik did — no shared docker network needed.
+services:
+  traefik:
+    image: traefik:v3.6.1
+    container_name: traefik
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - /etc/localtime:/etc/localtime:ro
+      - /srv/dm/ceph/traefik/acme:/acme
+      - /srv/dm/ceph/traefik/configurations:/configurations:ro
+    environment:
+      CF_API_EMAIL: "${CF_API_EMAIL}"
+      CF_DNS_API_TOKEN: "${CF_DNS_API_TOKEN}"
+    command:
+      - --api.dashboard=false
+      - --log.level=INFO
+      - --providers.file.directory=/configurations
+      - --providers.file.watch=true
+      - --entrypoints.web.address=:80
+      - --entrypoints.websecure.address=:443
+      - --entrypoints.web.http.redirections.entryPoint.to=websecure
+      - --entrypoints.web.http.redirections.entryPoint.scheme=https
+      - --certificatesresolvers.cloudflare.acme.dnschallenge=true
+      - --certificatesresolvers.cloudflare.acme.dnschallenge.provider=cloudflare
+      - --certificatesresolvers.cloudflare.acme.email=${CF_API_EMAIL}
+      - --certificatesresolvers.cloudflare.acme.storage=/acme/acme.json
+
+  # Serves /.well-known/nostr.json (NIP-05 identity: bankless@bankless.at).
+  # Traefik has no static file server, so nginx stays — 5MB and it works.
+  # CORS is added by the nostr-cors middleware in dynamic.yml, not here: browser
+  # nostr clients fetch this cross-origin and plain nginx sends no ACAO header.
+  nostr-json:
+    image: nginx:alpine
+    container_name: nostr-json
+    restart: unless-stopped
+    volumes:
+      - /srv/dm/ceph/traefik/nostr-json:/usr/share/nginx/html:ro
+    networks:
+      - default
+    # No published port: traefik reaches this by container name on the stack's
+    # shared network. Nothing else needs it, so it stays off the host entirely.
