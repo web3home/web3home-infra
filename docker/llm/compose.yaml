@@ -16,7 +16,7 @@ services:
       --mmproj /models/mmproj-Qwen3.6-35B-A3B-f16.gguf
       -ngl 99
       -fa on
-      -c 8192
+      -c 32768
       --host 0.0.0.0
       --port 8000
       --alias qwen3.6-35b-a3b
