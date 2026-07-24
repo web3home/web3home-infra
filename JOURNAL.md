@@ -179,6 +179,31 @@ ufw rules `2368/tcp` and `3000/tcp` ALLOW from 192.168.31.11 — they existed so
 *Odroid's* Traefik could reach bee001's services. Dead weight.
 Traefik 3.7.8 is out; we pinned 3.6.1 to match the Odroid. Upgrade separately.
 
+## 2026-07-19 — private-stacks pattern; multi-root boot scan
+
+Support for stacks kept OUT of this public repo. `~/code/private-stacks/docker/` holds
+their compose + `.env`; content on CephFS. `compose-boot-up.sh` now scans BOTH roots
+(SCAN_DIRS) — an out-of-repo stack was otherwise invisible and never started at boot
+(the spleeter-web trap). First attempt used a QUOTED brace expansion, which skips
+pathname expansion so the glob stayed literal and 0 stacks started; fixed with a nested
+loop. git has no copy of private-stacks, so it and the private content path are both in
+BACKUP_PATHS.
+
+**Google Fonts / GDPR:** a static site pulling fonts from googleapis.com sends visitor
+IPs to Google pre-consent. LG München I, 3 O 17493/20 (2022): €100 + injunction + costs.
+Fetch CSS with a modern UA (else TTF not woff2), pull woff2 local, rewrite to relative
+paths, verify 0 gstatic refs.
+
+**Registrar-parking wildcard = ACME trap:** moving DNS to Cloudflare can import a parking
+`* -> host` wildcard that matches `_acme-challenge.<domain>`, so lego follows it and
+tries to write TXT in a zone the token can't touch (`zone could not be found`). Delete
+the wildcard, point www at apex. Then NS-delegation caching lingers — Cloudflare shows
+"Active" while resolvers still cache old NS. Let's Encrypt caps 5 failed validations
+/hostname/hour; don't restart-to-retry while delegation is stale.
+
+**WiZ/HA:** `network_mode: host` (UDP broadcast :38899); ufw governs the port; paired
+only after allowing 38899/udp.
+
 ## 2026-07-17 — DDNS: oznu → favonia; home-IP leak closed
 
 **Result:** two archived DDNS containers replaced by one maintained container, a
@@ -1226,28 +1251,3 @@ Keyfile chain: root passphrase unlocks `/`, then root holds keyfiles auto-unlock
 **Verified**: pending — applied during Phase 1 install.
 
 **Rollback**: requires full reinstall; partition decisions are effectively permanent post-install.
-
-## 2026-07-19 — private-stacks pattern; multi-root boot scan
-
-Support for stacks kept OUT of this public repo. `~/code/private-stacks/docker/` holds
-their compose + `.env`; content on CephFS. `compose-boot-up.sh` now scans BOTH roots
-(SCAN_DIRS) — an out-of-repo stack was otherwise invisible and never started at boot
-(the spleeter-web trap). First attempt used a QUOTED brace expansion, which skips
-pathname expansion so the glob stayed literal and 0 stacks started; fixed with a nested
-loop. git has no copy of private-stacks, so it and the private content path are both in
-BACKUP_PATHS.
-
-**Google Fonts / GDPR:** a static site pulling fonts from googleapis.com sends visitor
-IPs to Google pre-consent. LG München I, 3 O 17493/20 (2022): €100 + injunction + costs.
-Fetch CSS with a modern UA (else TTF not woff2), pull woff2 local, rewrite to relative
-paths, verify 0 gstatic refs.
-
-**Registrar-parking wildcard = ACME trap:** moving DNS to Cloudflare can import a parking
-`* -> host` wildcard that matches `_acme-challenge.<domain>`, so lego follows it and
-tries to write TXT in a zone the token can't touch (`zone could not be found`). Delete
-the wildcard, point www at apex. Then NS-delegation caching lingers — Cloudflare shows
-"Active" while resolvers still cache old NS. Let's Encrypt caps 5 failed validations
-/hostname/hour; don't restart-to-retry while delegation is stale.
-
-**WiZ/HA:** `network_mode: host` (UDP broadcast :38899); ufw governs the port; paired
-only after allowing 38899/udp.
