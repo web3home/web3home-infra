@@ -43,6 +43,7 @@ BACKUP_PATHS=(
   /srv/dm/ceph/traefik
   /etc
   /opt/web3home
+  /home/dm/code/private-stacks
 )
 
 log() {
