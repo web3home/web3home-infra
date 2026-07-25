@@ -2,6 +2,82 @@
 
 Order: oldest at the bottom, newest at the top.
 
+## 2026-07-25 — JOURNAL structure repaired; mattermost healthcheck root-caused
+
+**Type**: maintenance · **Outcome**: both fixed, verified
+
+### JOURNAL.md had drifted structurally (no content was lost)
+
+Three defects, none caught by `2f9dcbf journal: restore newest-first ordering` —
+that commit fixed less than its message claimed:
+
+- `# Journal entries` + the ordering rule sat at line 730, with 729 lines of
+  entries above the file's own title. Anyone reading top-down met entries with
+  no ordering convention stated.
+- Newest-first violated at the head: 07-17 (traefik) → **07-19** → 07-17 (ddns).
+- An entire entry had lost its `##` heading and fused onto the tail of the 06-01
+  CephFS incident — the restic-extended-to-CephFS-Nextcloud work (seed snapshot
+  `4cf255ee`, 538.839 GiB, script backup `.bak-2026-05-31`). Read top-down it
+  looked like part of that incident. Restored as `## 2026-05-31`, dated from the
+  `.bak-` filename.
+
+Suspected duplication was a false alarm. The 05-31 entry only *resembles*
+`2026-05-29 — restic backup on bee001`; that one is the initial install
+(snapshot `5f87733c`, 93 MiB, scope `/srv/dm/services /etc /opt/web3home`). Two
+distinct events two days apart. Nothing merged.
+
+**Technique worth reusing** — a block reorder can be *proven* lossless before it
+touches the repo. Build into `/tmp`, then compare both files as sorted sets of
+non-blank lines:
+
+    diff <(grep -v '^[[:space:]]*$' A | sort) <(grep -v '^[[:space:]]*$' B | sort)
+
+Empty diff = identical content, order only. Line-number surgery is additionally
+checksum-gated: `sha256sum` first, because ranges are worthless if the file has
+drifted by even one line.
+
+### mattermost-app: 8 days `(unhealthy)` while serving perfectly
+
+Root cause: the image ships
+`healthcheck: ["CMD","/mattermost/bin/mmctl","system","status","--local"]`.
+Local mode talks to `/var/tmp/mattermost_local.socket`, which only exists when
+`ServiceSettings.EnableLocalMode` is true. It defaulted to false, so the probe
+tested a disabled admin feature rather than app health. It had never passed once.
+
+**Ruled out — no curl-style probe is possible.**
+`mattermost-team-edition:11.0.2` is distroless: no `/bin/sh`, no `curl`, no
+`wget`. An HTTP probe would require a custom image, reopening the
+stale-Dockerfile trap from the 07-16 migration. Not worth it.
+
+**Fix**: `MM_SERVICESETTINGS_ENABLELOCALMODE=true` in compose.yaml. One env var,
+git-tracked, no custom image; matches upstream's own compose, which presumes
+local mode.
+
+**Security call (revised mid-session)**: first read was "unauthenticated admin
+socket = real blast-radius increase". That overstated it. Reaching the socket
+needs either `docker exec` (host root or docker group — already game over) or
+RCE inside mattermost, and that process already holds the Postgres credentials
+in its environment. Marginal capability gained is small. Caveat recorded:
+`mmctl` ships *inside* the image, so the abuse tool is pre-staged.
+
+**Verified**: `(healthy)` after recreate; `mmctl system status --local` returns
+Server/Database/Filestore OK; `/api/v4/system/ping` → 200.
+
+**Gotchas banked**:
+- `docker compose restart` does NOT pick up env changes — it reuses the existing
+  container's config. Env changes require `docker compose up -d` (recreate).
+- `docker compose config` renders the resolved file *including secrets* to the
+  terminal. `--quiet` validates silently.
+- `docker compose up -d` with no service argument recreates only changed
+  services — mattermost-db and mail2most were untouched, Postgres never blipped.
+
+### Deferred
+
+- Stale `**NEXT SESSION — HTPC build**` note inside the 06-01 entry (KDE/SDDM/
+  Steam/Kodi) still reads as a live next-action seven weeks on. Retitle to
+  `**HTPC — deferred (as of 06-01)**` so it stops competing with the roadmap.
+- Separator inconsistency: 31 entries, 18 `---`. Cosmetic.
+
 ## 2026-07-19 — private-stacks pattern; multi-root boot scan
 
 Support for stacks kept OUT of this public repo. `~/code/private-stacks/docker/` holds
