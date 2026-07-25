@@ -28,3 +28,16 @@ repos:
     rev: v0.10.0.1
     hooks:
       - id: shellcheck
+  # Real-address scanner — gitleaks matches credential shapes and has no
+  # concept of an IP, so it will never catch these. Added 2026-07-25 after the
+  # home WAN address was found in JOURNAL.md on a public repo.
+  # NOTE: the 91.64. prefix is the current ISP pool — re-check this rule after
+  # any WAN rotation, or it silently stops protecting anything.
+  - repo: local
+    hooks:
+      - id: no-real-ips
+        name: block real WAN/LAN addresses
+        language: pygrep
+        entry: '\b(91\.64\.\d{1,3}\.\d{1,3}|192\.168\.31\.\d{1,3})\b'
+        types: [text]
+        exclude: '^\.pre-commit-config\.yaml$'
