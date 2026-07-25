@@ -16,7 +16,7 @@
 #   Contains 4 ghost certs (odoo, traefik, ha, jellyfin) with no routers; harmless,
 #   they'll age out.
 #
-# Routes reach services via the host LAN IP (192.168.31.10:PORT), exactly as the
+# Routes reach services via the host LAN IP (192.168.1.10:PORT), exactly as the
 #   Odroid's Traefik did — no shared docker network needed.
 services:
   traefik:

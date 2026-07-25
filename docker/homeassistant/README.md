@@ -11,8 +11,8 @@ container cannot see — so HA runs in host networking. Two consequences:
 
 - `ufw` genuinely governs the port (unlike docker-published ports, which bypass
   ufw). LAN-only is enforced by:
-      ufw allow from 192.168.31.0/24 to any port 8123 proto tcp   # UI
-      ufw allow from 192.168.31.0/24 to any port 38899 proto udp  # WiZ discovery
+      ufw allow from 192.168.1.0/24 to any port 8123 proto tcp   # UI
+      ufw allow from 192.168.1.0/24 to any port 38899 proto udp  # WiZ discovery
   The UDP rule is what actually let the bulb pair — without it the broadcast reply
   was dropped.
 - HA auto-detects bee001's Bluetooth adapter and logs D-Bus errors (BlueZ needs

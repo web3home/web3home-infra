@@ -115,7 +115,7 @@ Certs were the enabler: earliest expiry Sep 19, i.e. **64 days out**, and Traefi
 renews at 30 days — so nothing would touch ACME before ~Aug 20 and **both Traefiks
 could run in parallel with no renewal race**. That meant no test ports: bee001's
 Traefik bound 80/443 and simply received nothing, because the router still forwarded
-to .11. Tested it directly with `curl --resolve <host>:443:192.168.31.10`, which
+to .11. Tested it directly with `curl --resolve <host>:443:192.168.1.10`, which
 bypasses DNS and Cloudflare entirely. The flip then became **only** the router
 change — nothing to reconfigure afterwards, and rollback was one router edit.
 
@@ -147,10 +147,10 @@ After the flip: 521 (Cloudflare "origin unreachable") on everything.
   damning — but **Docker publishes ports around ufw** (it writes iptables rules
   ahead of ufw's chain). Adding 80/443 changed nothing. Called "found it" too fast.
 - **tcpdump settled it in one shot:** `tcp[tcpflags] & tcp-syn != 0 and not src host
-  192.168.31.10` showed **zero inbound SYNs** during an external curl. Packets never
+  192.168.1.10` showed **zero inbound SYNs** during an external curl. Packets never
   arrived ⇒ router-side, ruling out everything host-side at once.
 - **Root cause: the router would not re-bind an EDITED forward rule.** The rules
-  displayed `443 → 192.168.31.10` correctly but did not take effect. Fix: **delete
+  displayed `443 → 192.168.1.10` correctly but did not take effect. Fix: **delete
   both rules, recreate from scratch, reboot the router.**
 
 ### Verification traps hit along the way
@@ -265,8 +265,8 @@ DNS record serving nothing. Deleted rather than placeholdered. The hash used `$$
 have matched in file-provider YAML. Rotate the password regardless if it exists
 anywhere else: apr1 is MD5 and cracks offline in seconds.
 
-The first sanitising pass replaced only `192.168.31.10` and missed
-`192.168.31.0/24` in the whitelist. **`grep -c` must return 0 before committing** —
+The first sanitising pass replaced only `192.168.1.10` and missed
+`192.168.1.0/24` in the whitelist. **`grep -c` must return 0 before committing** —
 gitleaks hunts tokens and keys, not RFC1918 addresses, so it would NOT have caught
 this.
 
@@ -280,7 +280,7 @@ argue with a reviewer.**
 
 ### Stale now
 
-ufw rules `2368/tcp` and `3000/tcp` ALLOW from 192.168.31.11 — they existed so the
+ufw rules `2368/tcp` and `3000/tcp` ALLOW from 192.168.1.11 — they existed so the
 *Odroid's* Traefik could reach bee001's services. Dead weight.
 Traefik 3.7.8 is out; we pinned 3.6.1 to match the Odroid. Upgrade separately.
 
@@ -291,7 +291,7 @@ silent staleness bug fixed, and `relay.bankless.at` stopped publishing our home 
 
 ### The leak
 
-Zone export showed `relay.bankless.at ... A 91.64.185.204 ; cf_tags=cf-proxied:false`
+Zone export showed `relay.bankless.at ... A 203.0.113.10 ; cf_tags=cf-proxied:false`
 — the ONLY grey-clouded A record across both zones. Our home IP was in public DNS:
 ISP, rough location, and a direct path bypassing Cloudflare entirely.
 
@@ -517,7 +517,7 @@ bulb — not worth migrating, and it lets us re-decide its exposure).
 - **Ingress identified.** `cloudflare-ddns` containers ⇒ dynamic public IP +
   port-forward, NOT a Cloudflare Tunnel. netcheck: 91.x public v4, no CGNAT,
   MappingVariesByDestIP false. So P3 is mostly **repointing the router's 80/443
-  forward from .11 → .10**; dynamic.yml's targets already say 192.168.31.10.
+  forward from .11 → .10**; dynamic.yml's targets already say 192.168.1.10.
 - **Vaultwarden was insecure.** No env vars at all ⇒ `SIGNUPS_ALLOWED` defaulted to
   **true** on an internet-facing instance (anyone could register), and `DOMAIN` unset
   (breaks WebAuthn/U2F + email links). Both fixed. ADMIN_TOKEN stays unset ⇒ /admin
