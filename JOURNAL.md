@@ -1,3 +1,32 @@
+# Journal entries
+
+Order: oldest at the bottom, newest at the top.
+
+## 2026-07-19 — private-stacks pattern; multi-root boot scan
+
+Support for stacks kept OUT of this public repo. `~/code/private-stacks/docker/` holds
+their compose + `.env`; content on CephFS. `compose-boot-up.sh` now scans BOTH roots
+(SCAN_DIRS) — an out-of-repo stack was otherwise invisible and never started at boot
+(the spleeter-web trap). First attempt used a QUOTED brace expansion, which skips
+pathname expansion so the glob stayed literal and 0 stacks started; fixed with a nested
+loop. git has no copy of private-stacks, so it and the private content path are both in
+BACKUP_PATHS.
+
+**Google Fonts / GDPR:** a static site pulling fonts from googleapis.com sends visitor
+IPs to Google pre-consent. LG München I, 3 O 17493/20 (2022): €100 + injunction + costs.
+Fetch CSS with a modern UA (else TTF not woff2), pull woff2 local, rewrite to relative
+paths, verify 0 gstatic refs.
+
+**Registrar-parking wildcard = ACME trap:** moving DNS to Cloudflare can import a parking
+`* -> host` wildcard that matches `_acme-challenge.<domain>`, so lego follows it and
+tries to write TXT in a zone the token can't touch (`zone could not be found`). Delete
+the wildcard, point www at apex. Then NS-delegation caching lingers — Cloudflare shows
+"Active" while resolvers still cache old NS. Let's Encrypt caps 5 failed validations
+/hostname/hour; don't restart-to-retry while delegation is stale.
+
+**WiZ/HA:** `network_mode: host` (UDP broadcast :38899); ufw governs the port; paired
+only after allowing 38899/udp.
+
 ## 2026-07-17 — Traefik moved to bee001: the Odroid is out of the serving path
 
 **Result:** the edge is on bee001. All seven routes serve from it, verified with the
@@ -178,31 +207,6 @@ argue with a reviewer.**
 ufw rules `2368/tcp` and `3000/tcp` ALLOW from 192.168.31.11 — they existed so the
 *Odroid's* Traefik could reach bee001's services. Dead weight.
 Traefik 3.7.8 is out; we pinned 3.6.1 to match the Odroid. Upgrade separately.
-
-## 2026-07-19 — private-stacks pattern; multi-root boot scan
-
-Support for stacks kept OUT of this public repo. `~/code/private-stacks/docker/` holds
-their compose + `.env`; content on CephFS. `compose-boot-up.sh` now scans BOTH roots
-(SCAN_DIRS) — an out-of-repo stack was otherwise invisible and never started at boot
-(the spleeter-web trap). First attempt used a QUOTED brace expansion, which skips
-pathname expansion so the glob stayed literal and 0 stacks started; fixed with a nested
-loop. git has no copy of private-stacks, so it and the private content path are both in
-BACKUP_PATHS.
-
-**Google Fonts / GDPR:** a static site pulling fonts from googleapis.com sends visitor
-IPs to Google pre-consent. LG München I, 3 O 17493/20 (2022): €100 + injunction + costs.
-Fetch CSS with a modern UA (else TTF not woff2), pull woff2 local, rewrite to relative
-paths, verify 0 gstatic refs.
-
-**Registrar-parking wildcard = ACME trap:** moving DNS to Cloudflare can import a parking
-`* -> host` wildcard that matches `_acme-challenge.<domain>`, so lego follows it and
-tries to write TXT in a zone the token can't touch (`zone could not be found`). Delete
-the wildcard, point www at apex. Then NS-delegation caching lingers — Cloudflare shows
-"Active" while resolvers still cache old NS. Let's Encrypt caps 5 failed validations
-/hostname/hour; don't restart-to-retry while delegation is stale.
-
-**WiZ/HA:** `network_mode: host` (UDP broadcast :38899); ufw governs the port; paired
-only after allowing 38899/udp.
 
 ## 2026-07-17 — DDNS: oznu → favonia; home-IP leak closed
 
@@ -707,6 +711,8 @@ commit. Plus docs/SOVEREIGNTY-NODE.md (the build guide).
 
 **NEXT SESSION — clean starting task (HTPC build on a working GPU base)**: install KDE Plasma + SDDM + Steam + Kodi for the living-room/Samsung-TV setup. Foundation verified: amdgpu bound, RADV exposes 8060S to `dm`, `/games` LUVS volume mounted (280G free), Steam needs multilib (already enabled). Reminder: streaming-service DRM (Netflix etc.) caps at 1080p on Linux — local media + YouTube fine. Consider setting default target back to multi-user.target and starting the desktop on demand to keep the server clean.
 
+## 2026-05-31 — restic extended to CephFS Nextcloud data (538 GiB seed, restore-verified)
+
 **Type**: backup · **Outcome**: success, restore-verified
 
 **Why**: migrated Nextcloud data (~540 GiB on single-OSD CephFS) had no bee001-side backup — the open gap from the 05-29 migration. Hard gate before any Postgres conversion or Odroid decommission.
@@ -727,9 +733,6 @@ commit. Plus docs/SOVEREIGNTY-NODE.md (the build guide).
 - Prevent manual/timer collision (flock wrapper, or just don't run manually near 03:30).
 - Commit sanitized script changes to repo (placeholder IP).
 - Still pending downstream: MariaDB→Postgres conversion (now has its rollback), Odroid Nextcloud decommission (only after a bake period — NOT yet).
-# Journal entries
-
-Order: oldest at the bottom, newest at the top.
 
 ## 2026-05-29 — Phase 3: Nextcloud migrated to bee001 (the big one)
 
