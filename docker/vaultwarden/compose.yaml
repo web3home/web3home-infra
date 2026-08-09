@@ -11,7 +11,7 @@
 #   and email links). Both fixed here. ADMIN_TOKEN stays unset -> /admin disabled.
 services:
   vaultwarden:
-    image: vaultwarden/server:1.37.1
+    image: vaultwarden/server:latest
     container_name: vaultwarden
     restart: unless-stopped
     volumes:
