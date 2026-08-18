@@ -27,6 +27,7 @@ NC_DUMP_FILE="${NC_DUMP_DIR}/nextcloud.sql"
 # Postgres-backed services: name|container|user|db|dump destination.
 POSTGRES_DBS=(
   "mattermost|mattermost-db|mattermost_user|mattermost|/srv/dm/services/mattermost-db/mattermost.sql"
+  "serytemura|serytemura-postgres|medusa|medusa|/srv/dm/services/serytemura-db/medusa.sql"
 )
 
 SQLITE_DBS=(
@@ -40,6 +41,8 @@ BACKUP_PATHS=(
   /srv/dm/ceph/vaultwarden
   /srv/dm/ceph/nostr-relay
   /srv/dm/ceph/mattermost
+  /srv/dm/ceph/serytemura
+  /srv/dm/ceph/altige
   /srv/dm/ceph/traefik
   /etc
   /opt/web3home
