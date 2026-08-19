@@ -5,10 +5,8 @@ services:
     restart: unless-stopped
     devices:
       - /dev/dri/renderD128
-      - /dev/dri/card1
     group_add:
       - "991"   # render (host GID)
-      - "44"    # video  (host GID)
     volumes:
       - /srv/dm/ceph/llm/models:/models:ro
     command: >
