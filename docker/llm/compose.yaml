@@ -15,7 +15,9 @@ services:
       --jinja
       -ngl 99
       -fa on
-      -c 32768
+      -c 262144
+      --parallel 2
+      --image-min-tokens 1024
       --host 0.0.0.0
       --port 8000
       --alias qwen3.8-27b-UD
