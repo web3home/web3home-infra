@@ -1,6 +1,6 @@
 services:
   llama-server:
-    image: ghcr.io/ggml-org/llama.cpp:server-vulkan
+    image: ghcr.io/ggml-org/llama.cpp:server-vulkan@sha256:7b9f3b2ced00b6da4c89531e9dfeb0e3a256ee53cfb9b584a3c0f237b6a86162
     container_name: llama-server
     restart: unless-stopped
     devices:
@@ -10,14 +10,15 @@ services:
     volumes:
       - /srv/dm/ceph/llm/models:/models:ro
     command: >
-      -m /models/Qwen_Qwen3.6-35B-A3B-Q4_K_M.gguf
-      --mmproj /models/mmproj-Qwen3.6-35B-A3B-f16.gguf
+      -m /models/Qwen3.8-27B-UD-Q4_K_XL.gguf
+      --mmproj /models/mmproj-Qwen3.8-27B-F16.gguf
+      --jinja
       -ngl 99
       -fa on
       -c 32768
       --host 0.0.0.0
       --port 8000
-      --alias qwen3.6-35b-a3b
+      --alias qwen3.8-27b-UD
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
       interval: 30s
