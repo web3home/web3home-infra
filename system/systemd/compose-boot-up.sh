@@ -18,6 +18,7 @@ shopt -s nullglob
 SCAN_DIRS=(
   "/home/dm/code/web3home-infra/docker"
   "/home/dm/code/private-stacks/docker"
+  "/home/dm/code/private-stacks"
 )
 
 rc=0
