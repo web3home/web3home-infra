@@ -2,6 +2,124 @@
 
 Order: oldest at the bottom, newest at the top.
 
+## 2026-08-26 — gRPC-through-Cloudflare ruled out; HA control plane; WireGuard split routing
+
+**Type**: investigation + build · **Outcome**: mesh path decided, control plane live
+
+### gRPC bidirectional streams do NOT survive Cloudflare's proxy
+
+Tested properly with grpcbin behind Traefik on an orange-clouded hostname,
+pass/fail defined before building. Result:
+
+- **Unary gRPC works fine.** Reflection (`grpcurl ... list`) returned the full
+  service list through Cloudflare → Traefik (`h2c://` backend) → grpcbin.
+- **Streams die at ~70s.** A bidirectional stream sending a message every 5s
+  survived 13 pings then: `Code: Internal / stream terminated by RST_STREAM
+  with error code: INTERNAL_ERROR`.
+
+Prerequisites, all of which must hold or you get a 403: gRPC toggled on
+per-zone in Network settings, endpoint on 443, TLS + HTTP/2 with ALPN, SSL/TLS
+mode at least Full. Traefik needs `url: "h2c://<container>:<port>"` — plain
+`http://` speaks HTTP/1.1 to the backend and gRPC never works.
+
+**Consequence: NetBird behind Cloudflare is dead.** Its management connection
+is exactly this kind of stream; peers would reconnect every ~70s forever. This
+likely also explains the upstream reports of self-hosted NetBird peers stuck on
+`Relayed` with `SentOffer` climbing — same signature as a reaped stream.
+
+Also closed off: Cloudflare Tunnel supports gRPC only via private subnet
+routing, not public hostnames. And enabling gRPC on a zone means WAF managed
+rules stop inspecting gRPC stream content (header inspection only) — turned the
+toggle back off after the test.
+
+**Reframing that came out of this**: the actual requirement was remote access to
+HA, SSH and ComfyUI — not a mesh. SSH via Cloudflare Tunnel, HA via an SSH
+port-forward, ComfyUI behind Authelia covers all three with no coordination
+server and no origin exposure. Mesh demoted from blocking to optional.
+
+### HA control plane over SSH forced command (no docker socket)
+
+HA holds a dedicated ed25519 key; `authorized_keys` pins it with
+`command="/usr/local/bin/bee-control",restrict`. The script is a literal `case`
+allowlist. Boundary verified from inside the HA container: allowed verb returns
+its value, `cat /etc/shadow` returns `denied: not in allowlist` exit 1.
+
+Chosen over mounting `/var/run/docker.sock`, which has no meaningful read-only
+mode — anything that can start a container can start a privileged one that
+bind-mounts `/`. Also covers Sunshine, which is a user systemd service and not a
+container, so one mechanism handles everything.
+
+**The lesson that cost two debugging rounds — the SSH forced-command context is
+not a login session.** No TTY, no cached sudo credential, no reliable session
+bus. Interactive testing hides this completely because your shell has all three.
+It broke twice with different symptoms:
+
+- `systemctl --user is-active <sunshine>` worked in the shell, failed via SSH.
+  Fix: `pgrep -x sunshine`, which needs no session bus.
+- `sudo powerprofilesctl` failed with return code 1 in HA's logs — no TTY to
+  prompt on. Fix: explicit `NOPASSWD` sudoers rule for that one binary, plus
+  `sudo -n` in the script so failure is loud instead of hanging.
+
+Symptom in both cases is a button that silently does nothing. Test every new arm
+*through the container*, not just locally.
+
+**HA config gotcha**: `command_line` **switch** is on when `value_template`
+renders `true`; **binary_sensor** compares against `payload_on`/`payload_off`
+defaulting to `ON`/`OFF`. Same template does not work for both — a
+`{{ value == 'on' }}` on a binary_sensor leaves it `Unknown` forever.
+
+### WireGuard full-tunnel on a container host: exclude by SOURCE, not destination
+
+A commercial full-tunnel config (`AllowedIPs = 0.0.0.0/0`) installs a default
+route in its own table, which would have sent Traefik's ACME calls, the DDNS
+client's API calls, and every service's egress down the tunnel — publishing the
+VPN's address as our A records and breaking inbound return routing.
+
+Since every service here is a container and the things wanting the VPN are
+host-native, excluding by source is exact:
+
+    PostUp = ip -4 rule add from 172.16.0.0/12 lookup main priority 100
+    PostUp = ip -4 rule add to <lan>/24 lookup main priority 101
+
+Verified: host `ifconfig.me` returns the VPN address, a container returns the
+real one, DDNS keeps publishing correctly, and HTTPS still loads from mobile
+data with the tunnel up. That last check is the one that matters — the container
+test only proves egress, not that inbound replies still route home.
+
+Exposed in HA as a switch. Deliberately **not** enabled at boot: `wg-quick@wg0`
+stays disabled, so the VPN is opt-in and the switch reads `off` after a reboot
+by design.
+
+### Also this session
+
+- Qwen3.6-35B-A3B → **Qwen3.8-27B-UD-Q4_K_XL**. This is a **dense** model, not
+  MoE — measured **12.3 t/s** generation vs ~60 on the A3B. ~17.5 GB read per
+  token against ~215 GB/s bandwidth matches the arithmetic. Deliberate trade:
+  better coding model, 5× slower generation.
+- **Power profile makes no measurable difference to generation**: 12.32 t/s on
+  power-saver vs 12.38 on performance. Generation is bandwidth-bound, not
+  CPU-bound.
+- `-c 262144 --parallel 2` (131k per slot, up from 32k) cost nothing on
+  generation throughput. Prompt eval on a short prompt roughly halved.
+- llama.cpp pinned by digest; vaultwarden re-pinned to 1.37.1.
+- Baseline for future comparison: Qwen3.8-27B-UD-Q4_K_XL, dense, Vulkan
+  backend, digest `7b9f3b2c`, `-np 2`, `-c 262144`, 12.3 t/s.
+- **Host RAM is the scarce resource, not GPU memory.** The 96/32 split leaves
+  ~30 GB for the host, of which ~450 MiB was free with 1.9 GB swapped — while
+  llama.cpp reported 113 GB free GPU-side. An SSH session dropped during the
+  262k KV allocation. The mode-exclusivity in the HA control plane is therefore
+  load-bearing, not merely tidy.
+- Kernel moved 7.0.0-27 → 7.0.0-30. Expect DRM renumbering on next reboot;
+  llama-server and ComfyUI are immune, Sunshine is not.
+
+### Still open
+
+- **restic has landed no snapshots since 19 July** — outranks everything here.
+- WAN rotation still pending; origin lockdown (DOCKER-USER rules or
+  Authenticated Origin Pulls) now ranks above it, since orange-clouding hides
+  the IP in DNS but does not stop direct-to-origin connections.
+- Nextcloud MariaDB → Postgres — must not happen until restic is healthy again.
+
 ## 2026-07-25 — JOURNAL structure repaired; mattermost healthcheck root-caused
 
 **Type**: maintenance · **Outcome**: both fixed, verified
