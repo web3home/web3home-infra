@@ -2,6 +2,119 @@
 
 Order: oldest at the bottom, newest at the top.
 
+## 2026-09-09 — Unattended recovery: network-bound unlock, keyfile unlock, remote access over VPN
+
+**Type**: availability + security · **Outcome**: full power-cut recovery chain, both paths tested
+
+Before this, a power cut while away meant everything stayed down until someone
+was physically home: bee001 wants a LUKS passphrase (dropbear is LAN-scoped by
+design) and the backup drive wanted one too.
+
+### Unlock host: keyfile unlock, and a bigger gap found on the way
+
+The backup drive was LUKS-encrypted and unlocked **by hand**. `/etc/crypttab`
+held only its comment header and `/etc/fstab` had no `/mnt/backup` entry at all —
+so it would never have come back automatically after a reboot, passphrase or not.
+It had simply stayed mounted for 27 days.
+
+Fix: random keyfile at `/etc/luks-keys/backup-drive.key` (0400 root), added as a
+**second** keyslot via `luksAddKey` — the passphrase slot untouched. Then crypttab
+(LUKS container UUID) + fstab (ext4 UUID), both `nofail` so a missing drive can't
+drop a headless box into an emergency shell.
+
+**Three UUIDs, easily confused.** `blkid /dev/sdXN` gives the LUKS container UUID
+*and* a PARTUUID; fstab needs a third value — the ext4 UUID from
+`/dev/mapper/<name>`. Using the PARTUUID was caught by `findmnt --verify` as
+`[E] unreachable on boot required source`. **Run `findmnt --verify` before every
+reboot following an fstab change.**
+
+The key sits beside the data it unlocks. Accepted deliberately: restic repos are
+encrypted client-side with a key held on bee001, so that drive is ciphertext to
+anyone who takes it. The LUKS layer was protecting ciphertext and costing
+unattended boots.
+
+Verified: host rebooted, back in ~1 min, `/mnt/backup` mounted by itself.
+
+### bee001: Tang + Clevis network-bound unlock
+
+Tang runs on a separate always-on host (Debian's `tangd.socket` listens on
+**port 80**, `Accept=true`). Bound with
+`clevis luks bind -d <root> tang '{"url":"http://<unlock-host>"}'`.
+
+**Binding is additive** — a free keyslot, slot 0 untouched. That is what
+guarantees the fallback: worst case is exactly the old behaviour, never worse.
+
+`clevis luks unlock` **cannot** test a live root ("device in use"). Test the
+mechanism instead: `echo test | clevis encrypt tang '{...}' -y | clevis decrypt`.
+
+The initramfs network was already configured for dropbear (`IP=` in
+`initramfs.conf`, static, wired NIC) and Clevis reuses it — no conflict.
+
+**Both paths tested:**
+
+- **Unlock host up** → bee001 unlocks unattended. Confirmed by
+  `systemd-cryptsetup: Volume dm_crypt-0 already active` — the initramfs had
+  opened it before systemd started.
+- **Unlock host off** → clean, prompt fall-through to dropbear. No hang.
+
+**Design decision, deliberate**: Tang is LAN-local, so the disk unlocks only
+where it belongs. This trades theft-resistance-if-both-boxes-are-taken for
+unattended recovery. Exposing Tang publicly would be strictly worse — a stolen
+box would then unlock anywhere with an internet connection, and the LUKS header
+names the Tang URL, so `clevis luks list` hands a thief the address. Mitigation
+is physical: site the unlock host away from the obvious hardware.
+
+**Untested**: the real power-cut case, where the unlock host is still coming up
+*while* bee001 asks for a key. The shipped hook waits at most 10s for the network
+(`/usr/share/initramfs-tools/scripts/local-top/clevis`, ~line 238) and the unlock
+host is on a slow link, so Tang may lose that race. Lever if it does: extend that
+wait, at the cost of a slower boot whenever that host is genuinely gone.
+
+### Remote access
+
+`wg-quick@wg0` **enabled at boot** (was opt-in). Recorded consequence: the VPN
+provider is now a dependency of remote recovery. Tang gets bee001 unlocked; the
+VPN is what gets *us* to it.
+
+Phone key added to `authorized_keys` (generated on-device, passphrase-protected).
+HA reachable over the VPN after a ufw rule, and via `ssh -L` with no rule at all.
+**Cloudflare Tunnel turned out unnecessary** — the VPN carries both devices, so
+no third party sits in the admin path.
+
+### sshd: config ordering was silently undoing our hardening
+
+`50-cloud-init.conf` set `PasswordAuthentication yes`; our
+`99-web3home-hardening.conf` set `no`. **In sshd_config the FIRST obtained value
+wins**, and `50-` sorts first — so password auth had been enabled all along, on a
+box now reachable from the VPN. Renamed to `00-`. **Only `sshd -T` tells the
+truth**; reading the files does not.
+
+### Sunshine over the VPN
+
+Moonlight's "check your firewall for port(s)" dialog is **boilerplate** — it named
+a different set each failure, all red herrings. Sunshine's own log had it:
+encoders created, monitor found, `New streaming session started`, then
+`Ping Timeout`. A **UDP ufw rule for the VPN subnet had never applied** (TCP had).
+LAN worked because LAN had both. Read the service log, not the client dialog.
+
+### Also
+
+- Restic is **healthy**. A previously recorded "no snapshots since 19 July" was
+  stale and wrong — daily completions in the journal. Don't carry forward
+  unverified status claims.
+- Microcode still not applying across reboots (`0xb70001e`, expects `0xb700037`).
+- Kernel 7.0.0-31; DRM `card1` this boot. llama-server and ComfyUI immune,
+  Sunshine still picks its own device.
+- ComfyUI publishes **no ports**, nothing listens on 8188 — unreachable from
+  anywhere; its ufw rule is stale. Decide: publish on the LAN address like the
+  other stacks, or reach it via `ssh -L`.
+
+### Still open
+
+WAN rotation (origin lockdown ranks above it) · Nextcloud MariaDB → Postgres ·
+Odroid → Ceph node2, still single-OSD · monitoring/alerting, still the
+highest-value unbuilt thing.
+
 ## 2026-08-26 — gRPC-through-Cloudflare ruled out; HA control plane; WireGuard split routing
 
 **Type**: investigation + build · **Outcome**: mesh path decided, control plane live
