@@ -2,6 +2,48 @@
 
 Order: oldest at the bottom, newest at the top.
 
+## 2026-09-22 — memory carve-out 96G → 512M, llama-server → Qwen3.8-Flash-Next, open-webui pinned
+
+**Memory.** BIOS "Dedicated Graphics Memory" 96G → 512M — the only BIOS
+change; rollback is that one field. Host RAM 30 → 122 GiB, idle swap
+3.6 GiB → 0. GTT is a dynamic, reclaimable mapping, so a small carve-out
+plus a large TTM limit lets either side use almost all 128 GB, per AMD's
+ROCm guidance. `ttm pages_limit=29360128` (112 GiB) via
+/etc/modprobe.d/ttm.conf + update-initramfs (ttm.ko is in the initramfs).
+Vulkan llama-server unaffected (12.29 vs 12.26 t/s). ComfyUI/ROCm ran a
+51 GiB GTT allocation with zero memory/IO pressure — the workload class
+behind the 2026-08-29 outage. crashkernel now reserves 2048M+256M.
+Docker mem_limit does not govern GTT; the TTM limit is the only real
+ceiling, so mode exclusivity is now load-bearing.
+
+**llama-server → Qwen3.8-Flash-Next UD-IQ4_XS** (1c69824). qwen4exp merged
+upstream 2026-08-27: same image family, newer digest, so HA verbs and
+open-webui are unchanged. Decode 12.3 → 27.9 t/s (Vulkan, -np 2, no MTP).
+Verified correct at 17k-token context and reading document text via
+mmproj-F16. Requires LLAMA_ATTN_ROT_DISABLE=1 and
+-ot per_layer_token_embd=CPU. DeepSeek V4 Flash (ds4, IQ2_XXS) tried at
+15.5 t/s and removed. Qwen3.8-27B kept on disk as rollback pending
+multi-turn validation.
+
+**open-webui pinned by digest** (dc9d733). The :latest update was a blind
+~3-month jump with 14 one-way schema migrations; webui-data backed up first.
+
+**ComfyUI** (outside repo): bind 0.0.0.0 → LAN address + loopback;
+mem_limit 25g → 80g (measured non-binding at ~32 GiB).
+
+**Gotchas banked**
+- Bulk downloads through the full-tunnel VPN ran at ~150 kB/s; the same
+  download in a container ran at ~35 MB/s. The source-based exclusion rule
+  keeps containers off the tunnel — use it for large transfers.
+- xet progress misleads: a frozen "reconstructing 5.22MB" counter looked
+  like a stall while bytes arrived. Measure container NetIO, not du.
+- `systemctl stop web3home-stacks.service` does not stop containers — it's
+  a oneshot with no ExecStop.
+- Short prompts prove nothing about long-context correctness: a broken
+  qwen4exp fork is documented passing smoke tests while emitting noise
+  past ~700 tokens.
+
+
 ## 2026-09-09 — Unattended recovery: network-bound unlock, keyfile unlock, remote access over VPN
 
 **Type**: availability + security · **Outcome**: full power-cut recovery chain, both paths tested
