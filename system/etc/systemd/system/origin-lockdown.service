@@ -1,0 +1,14 @@
+[Unit]
+Description=Restrict inbound 80/443 to Cloudflare edge + LAN (DOCKER-USER)
+After=docker.service network-online.target
+Requires=docker.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/opt/web3home/bin/origin-lockdown.sh
+ExecStop=/sbin/iptables -F DOCKER-USER
+
+[Install]
+WantedBy=multi-user.target
