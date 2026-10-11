@@ -78,6 +78,15 @@ services:
       - /srv/dm/ceph/nextcloud/html:/var/www/html
       - /srv/dm/ceph/nextcloud/data:/var/www/html/data
     entrypoint: /cron.sh
+    # Clustering (Recognize MrdBallTree) runs HERE, not in the app container.
+    # Without this the cron container got PHP's stock 512M and every
+    # recognize:cluster-faces run died with "Allowed memory size exhausted" —
+    # silently, since cron swallows it. Face clustering was dead from 2026-06-27
+    # to 2026-10-11 for this one missing line.
+    environment:
+      PHP_MEMORY_LIMIT: 8192M
+    mem_limit: 12g
+    memswap_limit: 12g
     networks:
       - nextcloud-internal
 
