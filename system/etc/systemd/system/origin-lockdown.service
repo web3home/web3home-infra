@@ -8,7 +8,7 @@ Wants=network-online.target
 Type=oneshot
 RemainAfterExit=yes
 ExecStart=/opt/web3home/bin/origin-lockdown.sh
-ExecStop=/sbin/iptables -F DOCKER-USER
+ExecStop=/bin/bash -c 'while n=$(/sbin/iptables -S DOCKER-USER | grep -n -- "--comment origin-lockdown" | head -1 | cut -d: -f1); [ -n "$n" ]; do /sbin/iptables -D DOCKER-USER $((n-1)); done'
 
 [Install]
 WantedBy=multi-user.target
