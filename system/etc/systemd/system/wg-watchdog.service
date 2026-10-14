@@ -1,0 +1,7 @@
+[Unit]
+Description=Restart wg-quick@wg0 if the VPN hub is unreachable
+After=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/opt/web3home/bin/wg-watchdog.sh
