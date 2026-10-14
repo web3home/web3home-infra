@@ -27,3 +27,5 @@ tmp/
 # LLM model weights — large, re-downloadable, never commit
 *.gguf
 docker/llm/models/
+CLAUDE.md
+.claude/
