@@ -2,47 +2,190 @@
 
 Order: oldest at the bottom, newest at the top.
 
-## 2026-09-22 — memory carve-out 96G → 512M, llama-server → Qwen3.8-Flash-Next, open-webui pinned
+## 2026-10-14 — VPN reachability watchdog
 
-**Memory.** BIOS "Dedicated Graphics Memory" 96G → 512M — the only BIOS
-change; rollback is that one field. Host RAM 30 → 122 GiB, idle swap
-3.6 GiB → 0. GTT is a dynamic, reclaimable mapping, so a small carve-out
-plus a large TTM limit lets either side use almost all 128 GB, per AMD's
-ROCm guidance. `ttm pages_limit=29360128` (112 GiB) via
-/etc/modprobe.d/ttm.conf + update-initramfs (ttm.ko is in the initramfs).
-Vulkan llama-server unaffected (12.29 vs 12.26 t/s). ComfyUI/ROCm ran a
-51 GiB GTT allocation with zero memory/IO pressure — the workload class
-behind the 2026-08-29 outage. crashkernel now reserves 2048M+256M.
-Docker mem_limit does not govern GTT; the TTM limit is the only real
-ceiling, so mode exclusivity is now load-bearing.
+`wg-quick@wg0` is a oneshot: systemd reports `active (exited)` even when the
+tunnel passes no traffic. Added `/opt/web3home/bin/wg-watchdog.sh` plus a
+5-minute timer that pings the hub and restarts the unit on failure. Tested by
+deleting the fwmark rule — detected and recovered in 11s.
 
-**llama-server → Qwen3.8-Flash-Next UD-IQ4_XS** (1c69824). qwen4exp merged
-upstream 2026-08-27: same image family, newer digest, so HA verbs and
-open-webui are unchanged. Decode 12.3 → 27.9 t/s (Vulkan, -np 2, no MTP).
-Verified correct at 17k-token context and reading document text via
-mmproj-F16. Requires LLAMA_ATTN_ROT_DISABLE=1 and
--ot per_layer_token_embd=CPU. DeepSeek V4 Flash (ds4, IQ2_XXS) tried at
-15.5 t/s and removed. Qwen3.8-27B kept on disk as rollback pending
-multi-turn validation.
+First real monitoring on this box. Covers one thing only; the seven public
+routes and restic are still unwatched.
 
-**open-webui pinned by digest** (dc9d733). The :latest update was a blind
-~3-month jump with 14 one-way schema migrations; webui-data backed up first.
+---
 
-**ComfyUI** (outside repo): bind 0.0.0.0 → LAN address + loopback;
-mem_limit 25g → 80g (measured non-binding at ~32 GiB).
+## 2026-10-13 — origin lockdown, second attempt
 
-**Gotchas banked**
-- Bulk downloads through the full-tunnel VPN ran at ~150 kB/s; the same
-  download in a container ran at ~35 MB/s. The source-based exclusion rule
-  keeps containers off the tunnel — use it for large transfers.
-- xet progress misleads: a frozen "reconstructing 5.22MB" counter looked
-  like a stall while bytes arrived. Measure container NetIO, not du.
-- `systemctl stop web3home-stacks.service` does not stop containers — it's
-  a oneshot with no ExecStop.
-- Short prompts prove nothing about long-context correctness: a broken
-  qwen4exp fork is documented passing smoke tests while emitting noise
-  past ~700 tokens.
+Two bugs in the first version, both exposed by the 11 Oct outage.
 
+**The DROP had no interface qualifier.** `--ctorigdstport 443` matches container
+**egress** too — an outbound HTTPS request has an original destination port of
+443. So every container lost internet access. `-i enp197s0` fixes it: inbound
+internet arrives there, container egress arrives on a `br-*` bridge and never
+matches.
+
+**`iptables -F DOCKER-USER` flushes a chain Docker owns.** Replaced with tagged
+per-rule deletes, in the script and in the unit's `ExecStop`. First attempt at
+the delete loop matched `--comment "$TAG"` with quotes; `iptables -S` prints it
+bare, so nothing matched and rules doubled to 68 per run. Fixed and verified
+idempotent at 34 across repeated restarts.
+
+Tested **both directions** this time, which the first version never did:
+container egress, container→host LAN, local Traefik, public hostname from
+mobile data, and survival across a reboot.
+
+Still open: `OnFailure=status-email@%n.service` names a unit that does not
+exist. A boot-time DNS failure makes the Cloudflare fetch fail, the script
+exits 1, and the origin stays **open** with no alert.
+
+---
+
+## 2026-10-12 — Recognize face clustering: cron container had 512M
+
+Clustering dead since 27 June. Not a missing job — `ClassifyFacesJob` was
+registered but stuck at epoch zero. The cron log had it:
+
+```
+PHP Fatal error: Allowed memory size of 536870912 bytes exhausted
+  in .../recognize/lib/Clustering/MrdBallTree.php on line 456
+```
+
+**Clustering runs in the cron container, not the app container.** `app` had
+`PHP_MEMORY_LIMIT: 4096M`; `cron` had no `environment:` block at all and so got
+PHP's stock 512M. Every run died, and cron swallowed the error. Three months
+dead for one missing line.
+
+Added `PHP_MEMORY_LIMIT: 8192M` plus `mem_limit: 12g` / `memswap_limit: 12g` to
+the cron service. Manual `recognize:cluster-faces` then completed: 5272
+detections processed, 437 clustered.
+
+**Gotcha:** a service's `environment:` block is easy to assume is shared. Check
+the container that actually runs the work, not the one you think about.
+
+---
+
+## 2026-10-11 — a week of VPN lockout, then an hour of self-inflicted downtime
+
+**NetworkManager adopted wg0 on 24 Sep** (`new WireGuard device` in the journal)
+and flushed wg-quick's policy rules — the fwmark rules plus the priority 100/101
+exclusions. The tunnel stayed up and kept handshaking, so `wg show` looked
+perfect from both ends, but bee001 never replied on its tunnel address. Found
+only by diffing `ip rule show` against what wg-quick logged at boot. On repair,
+`ip -4 rule del … priority 100` returned `No such file or directory` — already
+gone.
+
+Fix: `/etc/NetworkManager/conf.d/99-unmanaged-wg.conf` marks wg0 unmanaged.
+Verified against an NM restart and a cold boot.
+
+**Then I broke everything else.** Restoring the policy rules appeared to kill
+Nextcloud, the shop, Vaultwarden and open-webui. Four wrong diagnoses in
+sequence — Ceph exhaustion, a missing LAN route, NM breaking `enp197s0`, the
+lockdown's DROP rules — each one a plausible story that the next test refuted.
+Actual cause: Docker's FORWARD rules were gone, and `systemctl restart docker`
+rebuilt them. The lockdown's `-F DOCKER-USER` is the leading suspect but was
+never proven.
+
+**Lessons, expensively bought:**
+- Capture `iptables-save` *before* changing firewall state, not after. I flushed
+  the chain and lost the packet counters that would have named the culprit.
+- A plausible hypothesis that fits the symptoms is not evidence. Four in a row
+  fit, and all four were wrong.
+- Debugging live routing at 23:00 with services down is how the second mistake
+  happens. Should have taken the rollback and resumed with a clear head.
+- `systemctl start` on a unit systemd still thinks is active is a silent no-op
+  (`wg show` reported "No such device"). Use `restart`.
+---
+
+## 2026-09-28 — origin locked to Cloudflare (first attempt)
+
+Closes the direct path to Traefik so `CF-Connecting-IP` becomes trustworthy
+before serytimura.pl takes payments. Rules in `DOCKER-USER` because ufw does not
+govern Docker-published ports, matching `--ctorigdstport` because Docker DNATs
+before FORWARD. Cloudflare ranges fetched at run time; the script refuses to
+apply if the fetch fails, which fails **open**.
+
+All twelve routed hostnames confirmed proxied, so no grey-clouded host was cut
+off. No VPN exemption — the VPN exit is a shared commercial IP, and admitting it
+would admit every other customer on that node. Direct access is via LAN or
+`ssh -L` instead.
+
+Chose the `DOCKER-USER` allowlist over a Cloudflare Tunnel: the tunnel would
+have made every proxied site depend on Cloudflare with no direct path at all,
+which on a project called Sovereignty Grid is the wrong trade. It would also
+have broken the `forwardedHeaders` fix below, since Traefik's peer becomes the
+cloudflared container.
+
+**Verified inbound only** — see 13 Oct for what that missed.
+
+---
+
+## 2026-09-26 — Traefik: trust Cloudflare forwarded headers, enable access log
+
+Nextcloud was returning 429s. Cause was not Nextcloud's own throttle: Traefik had
+no `forwardedHeaders.trustedIPs`, so it saw a Cloudflare edge IP as the client.
+One shared rate-limit bucket for the entire internet, brute-force keyed on the
+wrong IP, and no usable access log. The shared `rate-limit` middleware is
+average 50 / period 1m — 0.83 req/s, which a single Nextcloud page load exceeds.
+
+Added the Cloudflare v4+v6 ranges and turned on JSON access logging. Verified
+real per-visitor IPs in `ClientHost` afterwards. The log immediately showed
+scanners hitting the origin directly, which is what motivated the lockdown two
+days later.
+
+Access logging had been off, which is why this took guesswork to trace.
+
+---
+
+## 2026-09-22 — llama-server → Qwen3.8-Flash-Next
+
+`qwen4exp` merged upstream 2026-08-27, so this is the same image family with a
+newer digest — HA verbs and open-webui unchanged, no fork build needed.
+
+Decode **12.3 → 27.9 t/s** (Vulkan, `-np 2`, no MTP), at IQ4_XS rather than the
+27B's Q4_K_XL. Verified correct at 17k-token context — six times past the window
+where a broken fork is documented emitting multilingual noise while passing
+every short smoke test — and verified reading document text via mmproj-F16.
+
+Requires `LLAMA_ATTN_ROT_DISABLE=1` and `-ot per_layer_token_embd=CPU`.
+
+DeepSeek V4 Flash (ds4, IQ2_XXS, 80.8 GiB) was tried first at 15.5 t/s and
+removed: slower *and* a more aggressive quant. Qwen3.8-27B kept on disk as
+rollback. open-webui pinned by digest at the same time — its `:latest` update
+was a blind ~3-month jump with 14 one-way schema migrations.
+
+---
+
+## 2026-09-12 — memory carve-out 96G → 512M
+
+BIOS `Dedicated Graphics Memory` 96G → 512M. One field; rollback is that field.
+
+Host RAM **30 → 122 GiB**, idle swap 3.6 GiB → 0. GTT is a dynamic, reclaimable
+mapping, so a small carve-out plus a large TTM limit lets either side use almost
+all 128 GB — this is AMD's own ROCm guidance, not a workaround. The earlier
+"rebalance to 64/64" recommendation was wrong: a fixed split just moves the wall.
+
+Evidence it was never needed: peak VRAM on the successful LTX-2.5 run was 39 GB
+of 96, peak `gtt_used` 331 MB of 15.2 GiB. Every failure had been host RAM.
+
+`ttm pages_limit=29360128` (112 GiB) via `/etc/modprobe.d/ttm.conf` plus
+`update-initramfs` — `ttm.ko` is in the initramfs, so without regenerating the
+setting silently would not apply.
+
+Results: llama-server unaffected (12.29 vs 12.26 t/s — Vulkan is fine with a
+tiny carve-out, confirmed on this box rather than from third-party reports).
+ComfyUI/ROCm ran a **51 GiB GTT allocation with zero memory and IO pressure** —
+the same workload class that deadlocked the box at load 1300 on 29 Aug.
+
+**Docker `mem_limit` does not govern GTT.** ComfyUI sat at 31.87 GiB of an 80g
+cap while holding 51 GiB of GTT, so the cap is not the ceiling — the TTM limit
+is. Mode exclusivity in the HA control plane is therefore load-bearing, not
+tidiness. `crashkernel` now reserves 2048M+256M, since the band is keyed on RAM
+size.
+
+Also banked: gfx1151 native ops are `int8_tensorwise`, `asym_w4a8_int8`,
+`convrot_w4a4`; `mxfp8`, `float8_e4m3fn` and `nvfp4` are emulated.
+
+---
 
 ## 2026-09-09 — Unattended recovery: network-bound unlock, keyfile unlock, remote access over VPN
 
