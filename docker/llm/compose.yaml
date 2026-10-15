@@ -46,7 +46,7 @@ services:
     volumes:
       - /srv/dm/ceph/llm/webui-data:/app/backend/data
     ports:
-      - "3000:8080"
+      - "${LLM_BIND_IP:-127.0.0.1}:3000:8080"
     networks:
       - llm-internal
 
