@@ -25,6 +25,12 @@ services:
       mail__options__auth__user: ${GHOST_SMTP_USER}
       mail__options__auth__pass: ${GHOST_SMTP_PASS}
       mail__from: noreply@web3home.info
+      # No phone-home (checked against Ghost 6.73.0 source; env values are
+      # JSON-parsed, so "false" arrives as a real boolean)
+      explore__update_url: ""        # boot ping to explore.ghost.org (site uuid, url, post counts)
+      updateCheck__url: ""           # daily update check; logs a harmless "update check failed"
+      privacy__useGravatar: "false"  # avatar lookups via gravatar.com (email hashes)
+      privacy__useIndexNow: "false"  # announcing new post URLs to search engines
     volumes:
       - /srv/dm/services/ghost/content:/var/lib/ghost/content
     ports:
