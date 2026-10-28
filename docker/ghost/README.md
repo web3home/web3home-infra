@@ -4,7 +4,7 @@ Public blog for `web3home.info`.
 
 ## Architecture
 
-- **Image**: `ghost:5-alpine`
+- **Image**: `ghost:6-alpine`, pinned by digest; update with `image-update.sh` (backs up `content/` first via `pre-update.sh`)
 - **Storage**: local path `/srv/dm/services/ghost/content/` on bee001
 - **Database**: SQLite, bundled (lives inside content directory)
 - **Mail**: Migadu SMTP, credentials via `.env`

@@ -11,7 +11,7 @@
 
 services:
   ghost:
-    image: ghost:5-alpine@sha256:a0506f3f05f5bdc6c950c5113cdcdb1e1f96fbf15f6dc0a39fc093c25348bdb5
+    image: ghost:6-alpine@sha256:4195f6c405e40230cd10c0770425cf500c1f542a96e9f6584c11649c150e5a89
     container_name: ghost-cms
     restart: unless-stopped
     environment:
