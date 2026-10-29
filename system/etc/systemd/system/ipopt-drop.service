@@ -1,0 +1,16 @@
+[Unit]
+Description=Drop inbound TCP packets carrying IPv4 options (CVE-2026-98432 stopgap)
+# early, so the rule is in place before any interface comes up
+DefaultDependencies=no
+Before=network-pre.target shutdown.target
+Wants=network-pre.target
+Conflicts=shutdown.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/opt/web3home/bin/ipopt-drop.sh up
+ExecStop=/opt/web3home/bin/ipopt-drop.sh down
+
+[Install]
+WantedBy=sysinit.target
