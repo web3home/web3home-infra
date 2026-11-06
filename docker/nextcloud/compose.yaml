@@ -40,7 +40,11 @@ services:
       - nextcloud-internal
 
   app:
-    image: nextcloud:33@sha256:a4f8627d317e6de663b700f6a0d022530f038980930a4b81e967e7c19501b839
+    image: nextcloud-ffmpeg:34
+    build:
+      context: .
+      args:
+        NEXTCLOUD_IMAGE: nextcloud:34@sha256:b89746a4febc93de82141921417f43b0d5ce69c3746feb485372559e9fbeec3f
     container_name: nextcloud-app
     restart: unless-stopped
     depends_on:
@@ -68,7 +72,11 @@ services:
       - traefik
 
   cron:
-    image: nextcloud:33@sha256:a4f8627d317e6de663b700f6a0d022530f038980930a4b81e967e7c19501b839
+    image: nextcloud-ffmpeg:34
+    build:
+      context: .
+      args:
+        NEXTCLOUD_IMAGE: nextcloud:34@sha256:b89746a4febc93de82141921417f43b0d5ce69c3746feb485372559e9fbeec3f
     container_name: nextcloud-cron
     restart: unless-stopped
     depends_on:
