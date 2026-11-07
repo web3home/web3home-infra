@@ -12,7 +12,7 @@ dc() { docker compose --project-directory "$DIR" "$@"; }
 OUT="$HOME/nc-pre-update"; STAMP=$(date +%F-%H%M)
 mkdir -p "$OUT"
 
-APP=$(dc ps -q app | head -1); DB=$(dc ps -q db | head -1)
+APP=$(dc ps -q app | head -1); DB=$(dc ps -q pgdb | head -1)
 if [ -z "$APP" ] || [ -z "$DB" ]; then echo "app or db container not running" >&2; exit 1; fi
 VER=$(docker exec -u www-data "$APP" php occ status --output=json | python3 -c 'import json,sys; print(json.load(sys.stdin)["versionstring"])')
 echo "Nextcloud now: $VER"

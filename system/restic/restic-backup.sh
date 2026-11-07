@@ -28,6 +28,7 @@ NC_DUMP_FILE="${NC_DUMP_DIR}/nextcloud.sql"
 POSTGRES_DBS=(
   "mattermost|mattermost-db|mattermost_user|mattermost|/srv/dm/services/mattermost-db/mattermost.sql"
   "serytemura|serytemura-postgres|medusa|medusa|/srv/dm/services/serytemura-db/medusa.sql"
+  "nextcloud|nextcloud-pg|nextcloud|nextcloud|/srv/dm/services/nextcloud-db/nextcloud-pg.sql"
 )
 
 SQLITE_DBS=(

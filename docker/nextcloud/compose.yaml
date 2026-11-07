@@ -1,7 +1,8 @@
 # Nextcloud — migrated from Odroid M1 (ARM64) to bee001 (amd64)
 #
 # Storage: CephFS-backed (/srv/dm/ceph/nextcloud/*), LUKS-encrypted OSD underneath
-# Database: MariaDB (restored from Odroid dump). Postgres conversion is a later step.
+# Database: Postgres 18 (service pgdb) since 2026-11-07, converted from MariaDB with
+#   occ db:convert-type. MariaDB kept stopped under profile legacy-mariadb for rollback.
 # Image: official nextcloud:33 (multi-arch -> amd64). NOT the custom -pdlib build.
 #   Consequence: no pdlib face-recognition; Memories ARM binaries disabled in config.
 #   Upgraded 32 -> 33 (33.0.5); occ upgrade ran clean on container restart.
@@ -12,6 +13,9 @@ services:
   db:
     image: mariadb:10.11
     container_name: nextcloud-db
+    # Retired 2026-11-07: Nextcloud runs on pgdb. Not started at boot; rollback:
+    #   docker compose --profile legacy-mariadb start db, restore the saved config.php.
+    profiles: ["legacy-mariadb"]
     restart: unless-stopped
     command: --transaction-isolation=READ-COMMITTED --binlog-format=ROW
     volumes:
@@ -39,6 +43,28 @@ services:
     networks:
       - nextcloud-internal
 
+  pgdb:
+    # Postgres 18 replaces MariaDB (whose data sits on CephFS). Data on local disk
+    # in a named volume, like serytemura; backed up by pg_dump in restic-backup.sh,
+    # never as files. The 18 image keeps data in /var/lib/postgresql/18/docker, so
+    # the volume mounts at /var/lib/postgresql (NOT .../data).
+    image: postgres:18-alpine@sha256:123b17998ccaf47e53b502e8c6a1e79afd8f579c6f3eec83c563da026f957395
+    container_name: nextcloud-pg
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: nextcloud
+      POSTGRES_USER: nextcloud
+      POSTGRES_PASSWORD: "${NC_PG_PASSWORD}"
+    volumes:
+      - nextcloud-pgdata:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U nextcloud -d nextcloud"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - nextcloud-internal
+
   app:
     image: nextcloud-ffmpeg:35
     build:
@@ -48,16 +74,12 @@ services:
     container_name: nextcloud-app
     restart: unless-stopped
     depends_on:
-      - db
+      - pgdb
       - redis
     volumes:
       - /srv/dm/ceph/nextcloud/html:/var/www/html
       - /srv/dm/ceph/nextcloud/data:/var/www/html/data
     environment:
-      MYSQL_HOST: db
-      MYSQL_DATABASE: "${MYSQL_DATABASE}"
-      MYSQL_USER: "${MYSQL_USER}"
-      MYSQL_PASSWORD: "${MYSQL_PASSWORD}"
       REDIS_HOST: redis
       PHP_MEMORY_LIMIT: 4096M
       PHP_UPLOAD_LIMIT: 32G
@@ -80,7 +102,7 @@ services:
     container_name: nextcloud-cron
     restart: unless-stopped
     depends_on:
-      - db
+      - pgdb
       - redis
     volumes:
       - /srv/dm/ceph/nextcloud/html:/var/www/html
@@ -104,3 +126,6 @@ networks:
     name: traefik
   nextcloud-internal:
     driver: bridge
+
+volumes:
+  nextcloud-pgdata:
