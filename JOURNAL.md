@@ -2,6 +2,122 @@
 
 Order: oldest at the bottom, newest at the top.
 
+## 2026-11-07 — Nextcloud: MariaDB → Postgres 18
+
+Database moved off CephFS: MariaDB's datadir sat on the single-OSD CephFS that
+deadlocked the box on 29 Aug. Postgres 18 runs as `pgdb` with a named volume on
+local disk, the same pattern as the shop. 1.8 GB, 178k filecache rows; the copy
+took under 5 minutes.
+
+**`occ db:convert-type` crashes at its last step on NC 35.** Every table copied,
+then sequence resync built `SELECT setval('oc_jobs_id_seq', (SELECT MAX() FROM ))`.
+Cause: since NC 33, `oc_jobs` and the three new preview tables get app-generated
+snowflake IDs; their old sequences are still *owned* by the column but no longer
+its default. Nextcloud's lookup finds no table for them; a naive "reset every
+owned sequence" fails the other way (a 1.5e17 ID does not fit an int sequence).
+Correct rule: reset only sequences the column actually uses (`is_identity` or a
+`nextval(` default) — 56 set, 4 skipped. Then wrote the five db keys into
+config.php by hand (tmp + rename, permissions kept). Upstream: issue #65389,
+unmerged fix PR #58762.
+
+**Maintenance mode did not hold.** It was on before the copy and found off
+afterwards; exceptions logged mid-copy show requests got through. Two phone
+uploads and their side rows landed in MariaDB only. Checked every table on both
+sides: no DAV (contacts/calendar) or share differences — the dangerous case,
+since a phone can delete local items the server "lost". The files themselves
+were re-uploaded to Postgres. Lesson: re-assert maintenance immediately before
+the copy and check it during, not once at the start.
+
+Two comparison traps that each produced a page of false alarms: `UNION ALL`
+row order differs between engines (diff sorted output), and `mariadb -N`
+escapes backslashes in class names (`-r` for raw).
+
+Verified before going live: identical row counts on 8 key tables, no
+still-existing migration missing from Postgres (12 absent ones all deleted from
+the code), recurring background jobs present. `memories_planet_geometry` is not
+part of any schema, so it is not converted — `occ memories:places-setup` rebuilt
+it. Backups now `pg_dump` nextcloud-pg; the pre-update hook dumps `pgdb`.
+MariaDB stopped, behind compose profile `legacy-mariadb`, kept as rollback.
+
+---
+
+## 2026-11-06 — Nextcloud 33 → 34 → 35, ffmpeg
+
+Memories 11 needs NC 34+; 33 tops out at Memories 8.1. Majors one at a time,
+each through the pre-update hook (DB dump + html tar) — its first real use.
+App compatibility read from each app's `appinfo/info.xml` at the release tag,
+not guessed: Recognize is single-major per release (11→33, 12→34, 13→35), so
+every jump disables it until the matching release is installed.
+
+ffmpeg added via a two-line Dockerfile on the pinned base image (`NEXTCLOUD_IMAGE`
+build arg). Video playback in Memories had been failing as "black photos":
+Xiaomi motion photos are JPEG + embedded clip, and the clip could not be
+transcoded. The Android client also needed a reinstall after the 8→11 jump.
+
+Consequence: Nextcloud is now a locally built image, which `image-update.sh`
+refuses by design. Update = change the digest in `NEXTCLOUD_IMAGE`, run the
+hook, `build`, `up`. A rebuild mode for the script is open.
+
+---
+
+## 2026-10-29 — CVE-2026-98432 stopgap; NFS off on the backup Pi
+
+IPv4 TCP connection-setup use-after-free, CVSS 9.8, no fixed kernel yet for
+Ubuntu or Raspberry Pi OS. Only reachable through a SYN carrying IPv4 options,
+which normal traffic never sends. `ipopt-drop.service` drops TCP with IHL > 5
+in raw/PREROUTING (u32 match), so it covers host, containers and VPN alike.
+Applied on bee001, the VPN hub and the Pi.
+
+Proven with an A/B test from the LAN: a Record Route SYN got a SYN-ACK without
+the rule and nothing with it; plain SYNs unaffected; counter incremented. (The
+Timestamp variant was dropped even without the rule — malformed test packet,
+so inconclusive.) Remove the unit once a fixed kernel is installed.
+
+Found while there: the Pi exported a share rw to `*` with `no_root_squash`.
+Unused; NFS and rpcbind disabled.
+
+---
+
+## 2026-10-28 — Ghost 6, image-update script, Node2Shell
+
+Node2Shell (CVE-2026-111497, Brotli decoder, fixed in Node 22.23.4/24.22.1).
+No service used Express 5 / body-parser 2, so the request-body path was closed;
+`fetch()` of untrusted Brotli was the remaining one. `ghost:5` turned out to be
+frozen on Node 20 (EOL, no fix), so Ghost went to 6.73.0 — SQLite kept, theme
+passed gscan. The shop's custom images rebuilt on a pinned `node:22.23.4-alpine`.
+
+The shop backend installed with `npm install` from package.json alone: a rebuild
+would have changed ~130 packages. Committed the lockfile from the running image
+and switched both installs to `npm ci` — the rebuild then differed from
+production in exactly zero packages.
+
+`image-update.sh`: pull, show old vs new (`--check`), run the stack's
+`pre-update.sh`, pin the digest, `up`, verify, print rollback and commit
+commands; never rolls back or commits by itself. Its first two live runs found
+bugs the mocks missed: docker's trailing newline broke the digest loop under
+`pipefail` (silent exit — now an ERR trap), and `tar | grep -q` SIGPIPE'd tar
+when the match came early.
+
+Ghost phone-home off: Explore ping, update check, Gravatar, IndexNow — all
+verified against the 6.73 source (env values are JSON-parsed, so `"false"` is a
+real boolean).
+
+---
+
+## 2026-10-21 — PHP "php2shell" (CVE-2026-109618/-109619)
+
+Nextcloud's image runs PHP as an Apache module, in scope. Contained first:
+temporary Traefik allowlist on the public route. Then patched to Nextcloud
+33.0.10 on PHP 8.4.27, image pinned by digest, allowlist lifted. Logs and
+files reviewed; no evidence of compromise found. A restic snapshot from before
+the patch is tagged for keeping.
+
+Checking the SAPI: `docker exec … php -r 'echo PHP_SAPI'` always reports `cli`
+— it tells you about the CLI, not what Apache runs. The Apache error log's
+startup line (`mpm_prefork` + PHP module) is the real answer.
+
+---
+
 ## 2026-10-14 — VPN reachability watchdog
 
 `wg-quick@wg0` is a oneshot: systemd reports `active (exited)` even when the
