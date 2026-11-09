@@ -64,6 +64,8 @@ services:
       retries: 5
     networks:
       - nextcloud-internal
+    command: ["postgres", "-c", "shared_buffers=2GB", "-c", "effective_cache_size=8GB"]
+    shm_size: 256mb
 
   app:
     image: nextcloud-ffmpeg:35
