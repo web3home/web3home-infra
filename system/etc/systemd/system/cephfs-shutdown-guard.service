@@ -16,7 +16,7 @@ RemainAfterExit=yes
 ExecStart=/bin/true
 # The script acts only during a real shutdown/reboot, not a manual unit restart
 ExecStop=/opt/web3home/bin/cephfs-shutdown-guard.sh
-TimeoutStopSec=75
+TimeoutStopSec=120
 
 [Install]
 WantedBy=multi-user.target
