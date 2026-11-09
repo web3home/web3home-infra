@@ -2,6 +2,11 @@
 Description=Stop containers and unmount CephFS before network teardown
 DefaultDependencies=no
 After=network.target network-online.target docker.service
+# Ceph must outlive the guard: at shutdown, units stop in reverse order, so
+# these keep the OSD, mon, mds and the encrypted OSD disk up until containers
+# have stopped and CephFS is unmounted.
+After=snap.microceph.daemon.service snap.microceph.mon.service snap.microceph.mgr.service snap.microceph.mds.service snap.microceph.osd.service
+After=systemd-cryptsetup@ceph\x2dosd.service
 Before=shutdown.target
 Conflicts=shutdown.target
 
