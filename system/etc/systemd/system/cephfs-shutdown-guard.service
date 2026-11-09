@@ -1,0 +1,17 @@
+[Unit]
+Description=Stop containers and unmount CephFS before network teardown
+DefaultDependencies=no
+After=network.target network-online.target docker.service
+Before=shutdown.target
+Conflicts=shutdown.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/bin/true
+# The script acts only during a real shutdown/reboot, not a manual unit restart
+ExecStop=/opt/web3home/bin/cephfs-shutdown-guard.sh
+TimeoutStopSec=75
+
+[Install]
+WantedBy=multi-user.target
