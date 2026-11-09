@@ -21,7 +21,7 @@ services:
     container_name: mattermost-db
     restart: unless-stopped
     volumes:
-      - /srv/dm/ceph/mattermost/db:/var/lib/postgresql/data
+      - mattermost-pgdata:/var/lib/postgresql/data
     environment:
       POSTGRES_USER: "${DB_USER}"
       POSTGRES_PASSWORD: "${DB_PASSWORD}"
@@ -112,3 +112,9 @@ services:
 networks:
   mattermost-internal:
     driver: bridge
+
+volumes:
+  # Local disk, not CephFS: a database on the single-OSD CephFS hangs when the
+  # OSD stalls (29 Aug) and could not finish its shutdown checkpoint (9 Nov).
+  mattermost-pgdata:
+    name: mattermost-pgdata
